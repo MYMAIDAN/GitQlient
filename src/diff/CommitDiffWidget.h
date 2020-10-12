@@ -27,7 +27,7 @@
 
 class GitBase;
 class FileListWidget;
-class RevisionsCache;
+class GitCache;
 
 /*!
  \brief The CommitDiffWidget creates the layout that contains the information of a commit diff. This widget is located
@@ -52,7 +52,7 @@ signals:
     \param previousSha The parent SHA of the current commit.
     \param file The file to show the diff.
    */
-   void signalOpenFileCommit(const QString &currentSha, const QString &previousSha, const QString &file);
+   void signalOpenFileCommit(const QString &currentSha, const QString &previousSha, const QString &file, bool isCached);
 
    /*!
     \brief Signal triggered when the user whats to see the blame history for a given file.
@@ -77,8 +77,7 @@ public:
     \param cache The repository internal cache.
     \param parent The parent widget if needed.
    */
-   explicit CommitDiffWidget(QSharedPointer<GitBase> git, QSharedPointer<RevisionsCache> cache,
-                             QWidget *parent = nullptr);
+   explicit CommitDiffWidget(QSharedPointer<GitBase> git, QSharedPointer<GitCache> cache, QWidget *parent = nullptr);
 
    /*!
     \brief Configures the widget by passing the two SHAs that will be compared.
@@ -90,7 +89,7 @@ public:
 
 private:
    QSharedPointer<GitBase> mGit;
-   QSharedPointer<RevisionsCache> mCache;
+   QSharedPointer<GitCache> mCache;
    FileListWidget *fileListWidget = nullptr;
    QString mFirstShaStr;
    QString mSecondShaStr;

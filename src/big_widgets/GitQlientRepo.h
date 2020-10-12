@@ -24,9 +24,11 @@
  ***************************************************************************************/
 
 #include <QFrame>
+#include <QThread>
+#include <QPointer>
 
 class GitBase;
-class RevisionsCache;
+class GitCache;
 class GitRepoLoader;
 class QCloseEvent;
 class QFileSystemWatcher;
@@ -36,8 +38,20 @@ class HistoryWidget;
 class DiffWidget;
 class BlameWidget;
 class MergeWidget;
+class GitServerWidget;
 class QTimer;
-class ProgressDlg;
+class WaitingDlg;
+class GitServerCache;
+
+namespace Jenkins
+{
+class JenkinsWidget;
+}
+
+namespace GitServer
+{
+class IRestApi;
+}
 
 enum class ControlsMainViews;
 
@@ -45,17 +59,6 @@ namespace Ui
 {
 class MainWindow;
 }
-
-/*!
- \brief The cofniguration regarding auto udpates for the GitQlientRepo class.
-
-*/
-struct GitQlientRepoConfig
-{
-   int mAutoFetchSecs = 300; /*!< The auto-fetch interval in seconds. Default value: 300. */
-   int mAutoFileUpdateSecs
-       = 60; /*!< The interval where GitQlient retrieves information from disk for the current WIP. Default: 10 secs.*/
-};
 
 /*!
  \brief The GitQlientRepo class is the main widget that stores all the subwidgets that act over the repository. This
@@ -82,6 +85,17 @@ signals:
     */
    void signalEditFile(const QString &fileName, int line, int column);
 
+   /**
+    * @brief signalLoadRepo Signal used to trigger the data update in a different thread.
+    */
+   void signalLoadRepo();
+
+   /**
+    * @brief repoOpened Signal triggered when the repo was successfully opened.
+    * @param repoPath The absolute path to the repository opened.
+    */
+   void repoOpened(const QString &repoPath);
+
 public:
    /*!
     \brief Default constructor.
@@ -96,12 +110,6 @@ public:
    */
    ~GitQlientRepo() override;
 
-   /*!
-    \brief Sets the configuration for the timers.
-
-    \param config The new configuration.
-   */
-   void setConfig(const GitQlientRepoConfig &config);
    /*!
     \brief Gets the current working dir.
 
@@ -125,8 +133,8 @@ protected:
 
 private:
    QString mCurrentDir;
-   GitQlientRepoConfig mConfig;
-   QSharedPointer<RevisionsCache> mGitQlientCache;
+   QSharedPointer<GitCache> mGitQlientCache;
+   QSharedPointer<GitServerCache> mGitServerCache;
    QSharedPointer<GitBase> mGitBase;
    QSharedPointer<GitRepoLoader> mGitLoader;
    HistoryWidget *mHistoryWidget = nullptr;
@@ -136,11 +144,18 @@ private:
    DiffWidget *mDiffWidget = nullptr;
    BlameWidget *mBlameWidget = nullptr;
    MergeWidget *mMergeWidget = nullptr;
+   GitServerWidget *mGitServerWidget = nullptr;
+   Jenkins::JenkinsWidget *mJenkins = nullptr;
    QTimer *mAutoFetch = nullptr;
    QTimer *mAutoFilesUpdate = nullptr;
-   ProgressDlg *mProgressDlg = nullptr;
+   QTimer *mAutoPrUpdater = nullptr;
+   QPointer<WaitingDlg> mWaitDlg;
    QFileSystemWatcher *mGitWatcher = nullptr;
    QPair<ControlsMainViews, QWidget *> mPreviousView;
+   QSharedPointer<GitServer::IRestApi> mApi;
+
+   bool mIsInit = false;
+   QThread *m_loaderThread;
 
    /*!
     \brief Updates the UI cache and refreshes the subwidgets.
@@ -194,15 +209,9 @@ private:
 
    /*!
     \brief Updates the progess dialog when loading a really huge repository.
-    \param total Total number of steps
    */
-   void createProgressDialog(int total);
+   void createProgressDialog();
 
-   /*!
-    \brief Updates the progess dialog when loading a really huge repository.
-    \param step Number of step
-   */
-   void updateProgressDialog(int step);
    /*!
     \brief When the loading finishes this method closes and destroyes the dialog.
 
@@ -215,7 +224,8 @@ private:
     \param previousSha The SHA to compare to.
     \param file The file to show the diff.
    */
-   void loadFileDiff(const QString &currentSha, const QString &previousSha, const QString &file);
+   void loadFileDiff(const QString &currentSha, const QString &previousSha, const QString &file, bool isCached);
+
    /*!
     \brief Shows the history/repository view.
 
@@ -251,6 +261,26 @@ private:
     \brief Shows the merge view.
    */
    void showMergeView();
+
+   bool configureGitServer() const;
+
+   /**
+    * @brief showGitServerView Shows the configured git server view.
+    */
+   void showGitServerView();
+
+   /**
+    * @brief showGitServerPrView Shows the configured git server view opening the details of the pull request identified
+    * by the given @p prNumber.
+    * @param prNumber The pull request number to show the details.
+    */
+   void showGitServerPrView(int prNumber);
+
+   /**
+    * @brief showBuildSystemView Shows the build system view.
+    */
+   void showBuildSystemView();
+
    /*!
     \brief Opens the previous view. This method is used when the diff view is closed and GitQlientRepo must return to
     the previous one.
@@ -262,4 +292,21 @@ private:
 
    */
    void updateWip();
+
+   /**
+    * @brief updateTagsOnCache Updates the remote tags in the cache.
+    */
+   void updateTagsOnCache();
+
+   /**
+    * @brief focusHistoryOnBranch Opens the graph view and focuses on the SHA of the last commit of the given branch.
+    * @param branch The branch.
+    */
+   void focusHistoryOnBranch(const QString &branch);
+
+   /**
+    * @brief focusHistoryOnPr Opens the graph view and focuses on the SHA of the PR number.
+    * @param prNumber The PR to put the focus on.
+    */
+   void focusHistoryOnPr(int prNumber);
 };

@@ -2,7 +2,7 @@
 #include <ui_CommitChangesWidget.h>
 
 #include <GitQlientRole.h>
-#include <RevisionsCache.h>
+#include <GitCache.h>
 #include <GitRepoLoader.h>
 #include <GitLocal.h>
 #include <UnstagedMenu.h>
@@ -16,7 +16,7 @@
 
 using namespace QLogger;
 
-WipWidget::WipWidget(const QSharedPointer<RevisionsCache> &cache, const QSharedPointer<GitBase> &git, QWidget *parent)
+WipWidget::WipWidget(const QSharedPointer<GitCache> &cache, const QSharedPointer<GitBase> &git, QWidget *parent)
    : CommitChangesWidget(cache, git, parent)
 {
    mCurrentSha = CommitInfo::ZERO_SHA;
@@ -25,9 +25,6 @@ WipWidget::WipWidget(const QSharedPointer<RevisionsCache> &cache, const QSharedP
 void WipWidget::configure(const QString &sha)
 {
    const auto commit = mCache->getCommitInfo(sha);
-
-   if (commit.parentsCount() <= 0)
-      return;
 
    if (!mCache->containsRevisionFile(CommitInfo::ZERO_SHA, commit.parent(0)))
    {
@@ -47,7 +44,6 @@ void WipWidget::configure(const QString &sha)
 
    ui->lUnstagedCount->setText(QString("(%1)").arg(ui->unstagedFilesList->count()));
    ui->lStagedCount->setText(QString("(%1)").arg(ui->stagedFilesList->count()));
-   ui->teDescription->moveCursor(QTextCursor::Start);
    ui->pbCommit->setEnabled(ui->stagedFilesList->count());
 }
 
@@ -106,12 +102,9 @@ void WipWidget::showUnstagedMenu(const QPoint &pos)
       connect(contextMenu, &UnstagedMenu::signalShowFileHistory, this, &WipWidget::signalShowFileHistory);
       connect(contextMenu, &UnstagedMenu::signalStageFile, this, [this, item] { addFileToCommitList(item); });
       connect(contextMenu, &UnstagedMenu::signalConflictsResolved, this, [this, item] {
-         const auto fileWidget = qobject_cast<FileWidget *>(ui->unstagedFilesList->itemWidget(item));
-
          item->setData(GitQlientRole::U_IsConflict, false);
-         item->setText(fileWidget->text().remove("(conflicts)").trimmed());
          item->setForeground(GitQlientStyles::getGreen());
-         configure(mCurrentSha);
+         addFileToCommitList(item);
       });
 
       const auto parentPos = ui->unstagedFilesList->mapToParent(pos);

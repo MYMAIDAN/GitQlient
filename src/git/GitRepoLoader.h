@@ -24,13 +24,15 @@
  ***************************************************************************************/
 
 #include <GitExecResult.h>
+#include <CommitInfo.h>
 
 #include <QObject>
 #include <QSharedPointer>
 #include <QVector>
 
 class GitBase;
-class RevisionsCache;
+class GitCache;
+struct WipRevisionInfo;
 
 class GitRepoLoader : public QObject
 {
@@ -38,28 +40,30 @@ class GitRepoLoader : public QObject
 
 signals:
    void signalLoadingStarted(int total);
-   void signalLoadingStep(int value);
    void signalLoadingFinished();
    void cancelAllProcesses(QPrivateSignal);
+   void signalRefreshPRsCache(const QString repoName, const QString &repoOwner, const QString &serverUrl);
 
 public:
-   explicit GitRepoLoader(QSharedPointer<GitBase> gitBase, QSharedPointer<RevisionsCache> cache,
-                          QObject *parent = nullptr);
+   explicit GitRepoLoader(QSharedPointer<GitBase> gitBase, QSharedPointer<GitCache> cache, QObject *parent = nullptr);
    bool loadRepository();
    void updateWipRevision();
    void cancelAll();
    void setShowAll(bool showAll = true) { mShowAll = showAll; }
-   bool showsAll() const { return mShowAll; }
 
 private:
    bool mShowAll = true;
    bool mLocked = false;
    QSharedPointer<GitBase> mGitBase;
-   QSharedPointer<RevisionsCache> mRevCache;
+   QSharedPointer<GitCache> mRevCache;
 
    bool configureRepoDirectory();
    void loadReferences();
    void requestRevisions();
-   void processRevision(const QByteArray &ba);
+   void processRevision(QByteArray ba);
+   WipRevisionInfo processWip();
    QVector<QString> getUntrackedFiles() const;
+   QList<CommitInfo> processUnsignedLog(QByteArray &log);
+   QList<CommitInfo> processSignedLog(QByteArray &log) const;
+   CommitInfo parseCommitData(QByteArray &commitData) const;
 };

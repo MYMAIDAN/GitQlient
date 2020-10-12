@@ -5,20 +5,23 @@
 #include <CommitHistoryContextMenu.h>
 #include <ShaFilterProxyModel.h>
 #include <CommitInfo.h>
-#include <RevisionsCache.h>
+#include <GitCache.h>
+#include <GitConfig.h>
+#include <GitQlientSettings.h>
+#include <GitBase.h>
 
 #include <QHeaderView>
-#include <QSettings>
 #include <QDateTime>
 
 #include <QLogger.h>
 using namespace QLogger;
 
-CommitHistoryView::CommitHistoryView(const QSharedPointer<RevisionsCache> &cache, const QSharedPointer<GitBase> &git,
-                                     QWidget *parent)
+CommitHistoryView::CommitHistoryView(const QSharedPointer<GitCache> &cache, const QSharedPointer<GitBase> &git,
+                                     const QSharedPointer<GitServerCache> &gitServerCache, QWidget *parent)
    : QTreeView(parent)
    , mCache(cache)
    , mGit(git)
+   , mGitServerCache(gitServerCache)
 {
    setEnabled(false);
    setContextMenuPolicy(Qt::CustomContextMenu);
@@ -28,8 +31,18 @@ CommitHistoryView::CommitHistoryView(const QSharedPointer<RevisionsCache> &cache
    setAttribute(Qt::WA_DeleteOnClose);
 
    header()->setSortIndicatorShown(false);
+   header()->setContextMenuPolicy(Qt::CustomContextMenu);
+   connect(header(), &QHeaderView::customContextMenuRequested, this, &CommitHistoryView::onHeaderContextMenu);
 
-   connect(header(), &QHeaderView::sectionResized, this, &CommitHistoryView::saveHeaderState);
+   connect(mCache.get(), &GitCache::signalCacheUpdated, this, &CommitHistoryView::refreshView);
+
+   connect(this, &CommitHistoryView::doubleClicked, this, [this](const QModelIndex &index) {
+      if (mCommitHistoryModel)
+      {
+         const auto sha = mCommitHistoryModel->sha(index.row());
+         emit signalOpenDiff(sha);
+      }
+   });
 }
 
 void CommitHistoryView::setModel(QAbstractItemModel *model)
@@ -44,7 +57,10 @@ void CommitHistoryView::setModel(QAbstractItemModel *model)
            [this](const QItemSelection &selected, const QItemSelection &) {
               const auto indexes = selected.indexes();
               if (!indexes.isEmpty())
+              {
                  scrollTo(indexes.first());
+                 emit clicked(indexes.first());
+              }
            });
 }
 
@@ -71,42 +87,89 @@ void CommitHistoryView::filterBySha(const QStringList &shaList)
 
 CommitHistoryView::~CommitHistoryView()
 {
-   QSettings s;
-   s.setValue(QString("%1").arg(objectName()), header()->saveState());
+   GitQlientSettings s;
+   s.setLocalValue(mGit->getGitQlientSettingsDir(), QString("%1").arg(objectName()), header()->saveState());
 }
 
 void CommitHistoryView::setupGeometry()
 {
-   QSettings s;
-   const auto previousState = s.value(QString("%1").arg(objectName()), QByteArray()).toByteArray();
+   GitQlientSettings s;
+   const auto previousState
+       = s.localValue(mGit->getGitQlientSettingsDir(), QString("%1").arg(objectName()), QByteArray()).toByteArray();
 
    if (previousState.isEmpty())
    {
       const auto hv = header();
       hv->setMinimumSectionSize(75);
-      hv->resizeSection(static_cast<int>(CommitHistoryColumns::SHA), 75);
-      hv->resizeSection(static_cast<int>(CommitHistoryColumns::GRAPH), 120);
-      hv->resizeSection(static_cast<int>(CommitHistoryColumns::AUTHOR), 160);
-      hv->resizeSection(static_cast<int>(CommitHistoryColumns::DATE), 125);
-      hv->resizeSection(static_cast<int>(CommitHistoryColumns::SHA), 75);
-      hv->setSectionResizeMode(static_cast<int>(CommitHistoryColumns::AUTHOR), QHeaderView::Fixed);
-      hv->setSectionResizeMode(static_cast<int>(CommitHistoryColumns::DATE), QHeaderView::Fixed);
-      hv->setSectionResizeMode(static_cast<int>(CommitHistoryColumns::SHA), QHeaderView::Fixed);
-      hv->setSectionResizeMode(static_cast<int>(CommitHistoryColumns::LOG), QHeaderView::Stretch);
+      hv->resizeSection(static_cast<int>(CommitHistoryColumns::Sha), 75);
+      hv->resizeSection(static_cast<int>(CommitHistoryColumns::Graph), 120);
+      hv->resizeSection(static_cast<int>(CommitHistoryColumns::Author), 160);
+      hv->resizeSection(static_cast<int>(CommitHistoryColumns::Date), 125);
+      hv->resizeSection(static_cast<int>(CommitHistoryColumns::Sha), 75);
+      hv->setSectionResizeMode(static_cast<int>(CommitHistoryColumns::Author), QHeaderView::Fixed);
+      hv->setSectionResizeMode(static_cast<int>(CommitHistoryColumns::Date), QHeaderView::Fixed);
+      hv->setSectionResizeMode(static_cast<int>(CommitHistoryColumns::Sha), QHeaderView::Fixed);
+      hv->setSectionResizeMode(static_cast<int>(CommitHistoryColumns::Log), QHeaderView::Stretch);
       hv->setStretchLastSection(false);
 
-      hideColumn(static_cast<int>(CommitHistoryColumns::ID));
+      hideColumn(static_cast<int>(CommitHistoryColumns::TreeViewIcon));
    }
    else
    {
       header()->restoreState(previousState);
-      header()->setSectionResizeMode(static_cast<int>(CommitHistoryColumns::LOG), QHeaderView::Stretch);
+      header()->setSectionResizeMode(static_cast<int>(CommitHistoryColumns::Log), QHeaderView::Stretch);
    }
 }
 
 void CommitHistoryView::currentChanged(const QModelIndex &index, const QModelIndex &)
 {
-   mCurrentSha = model()->index(index.row(), static_cast<int>(CommitHistoryColumns::SHA)).data().toString();
+   mCurrentSha = model()->index(index.row(), static_cast<int>(CommitHistoryColumns::Sha)).data().toString();
+}
+
+void CommitHistoryView::refreshView()
+{
+   QModelIndex topLeft;
+   QModelIndex bottomRight;
+
+   if (mProxyModel)
+   {
+      topLeft = mProxyModel->index(0, 0);
+      bottomRight = mProxyModel->index(mProxyModel->rowCount() - 1, mProxyModel->columnCount() - 1);
+      mProxyModel->beginResetModel();
+      mProxyModel->endResetModel();
+   }
+   else
+   {
+      topLeft = mCommitHistoryModel->index(0, 0);
+      bottomRight
+          = mCommitHistoryModel->index(mCommitHistoryModel->rowCount() - 1, mCommitHistoryModel->columnCount() - 1);
+      mCommitHistoryModel->onNewRevisions(mCache->count());
+   }
+
+   const auto auxTL = visualRect(topLeft);
+   const auto auxBR = visualRect(bottomRight);
+   viewport()->update(auxTL.x(), auxTL.y(), auxBR.x() + auxBR.width(), auxBR.y() + auxBR.height());
+}
+
+void CommitHistoryView::onHeaderContextMenu(const QPoint &pos)
+{
+   const auto menu = new QMenu(this);
+   const auto total = header()->count();
+
+   for (auto column = 3; column < total; ++column)
+   {
+      const auto columnName = model()->headerData(column, Qt::Horizontal, Qt::DisplayRole).toString();
+      const auto action = menu->addAction(columnName);
+      const auto isHidden = isColumnHidden(column);
+      action->setCheckable(true);
+      action->setChecked(!isHidden);
+      connect(action, &QAction::triggered, this, [column, this, action]() {
+         action->setChecked(!action->isChecked());
+         setColumnHidden(column, !isColumnHidden(column));
+      });
+   }
+
+   menu->exec(header()->mapToGlobal(pos));
 }
 
 void CommitHistoryView::clear()
@@ -149,7 +212,8 @@ void CommitHistoryView::showContextMenu(const QPoint &pos)
 
       if (!shas.isEmpty())
       {
-         const auto menu = new CommitHistoryContextMenu(mCache, mGit, shas, this);
+         const auto menu = new CommitHistoryContextMenu(mCache, mGit, mGitServerCache, shas, this);
+         // connect(menu, &CommitHistoryContextMenu::signalRefreshPRsCache, mCache.get(), &GitCache::refreshPRsCache);
          connect(menu, &CommitHistoryContextMenu::signalRepositoryUpdated, this, &CommitHistoryView::signalViewUpdated);
          connect(menu, &CommitHistoryContextMenu::signalOpenDiff, this, &CommitHistoryView::signalOpenDiff);
          connect(menu, &CommitHistoryContextMenu::signalOpenCompareDiff, this,
@@ -159,6 +223,7 @@ void CommitHistoryView::showContextMenu(const QPoint &pos)
          connect(menu, &CommitHistoryContextMenu::signalCherryPickConflict, this,
                  &CommitHistoryView::signalCherryPickConflict);
          connect(menu, &CommitHistoryContextMenu::signalPullConflict, this, &CommitHistoryView::signalPullConflict);
+         connect(menu, &CommitHistoryContextMenu::showPrDetailedView, this, &CommitHistoryView::showPrDetailedView);
          menu->exec(viewport()->mapToGlobal(pos));
       }
       else
@@ -166,52 +231,19 @@ void CommitHistoryView::showContextMenu(const QPoint &pos)
    }
 }
 
-void CommitHistoryView::saveHeaderState()
-{
-   QSettings s;
-   s.setValue(QString("%1").arg(objectName()), header()->saveState());
-}
-
 QList<QString> CommitHistoryView::getSelectedShaList() const
 {
    const auto indexes = selectedIndexes();
    QMap<QDateTime, QString> shas;
-   QVector<QVector<QString>> godVector;
 
    for (auto index : indexes)
    {
       const auto sha = mCommitHistoryModel->sha(index.row());
       const auto dtStr
-          = mCommitHistoryModel->index(index.row(), static_cast<int>(CommitHistoryColumns::DATE)).data().toString();
-      const auto dt = QDateTime::fromString(dtStr, "dd MMM yyyy hh:mm");
+          = mCommitHistoryModel->index(index.row(), static_cast<int>(CommitHistoryColumns::Date)).data().toString();
 
-      shas.insert(dt, sha);
-
-      const auto commit = mCache->getCommitInfo(sha);
-      auto branches = commit.getReferences(References::Type::LocalBranch)
-          + commit.getReferences(References::Type::RemoteBranches);
-
-      std::sort(branches.begin(), branches.end());
-      godVector.append(branches.toVector());
+      shas.insert(QDateTime::fromString(dtStr, "dd MMM yyyy hh:mm"), sha);
    }
 
-   auto commitsInSameBranch = false;
-
-   if (godVector.count() > 1)
-   {
-      QVector<QString> common;
-
-      for (auto i = 0; i < godVector.count() - 1; ++i)
-      {
-         QVector<QString> aux;
-         std::set_intersection(godVector.at(i).constBegin(), godVector.at(i).constEnd(),
-                               godVector.at(i + 1).constBegin(), godVector.at(i + 1).constEnd(),
-                               std::back_inserter(aux));
-         common = aux;
-      }
-
-      commitsInSameBranch = !common.isEmpty();
-   }
-
-   return commitsInSameBranch || shas.count() == 1 ? shas.values() : QList<QString>();
+   return shas.count() >= 1 ? shas.values() : QList<QString>();
 }

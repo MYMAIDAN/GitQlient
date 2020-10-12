@@ -26,12 +26,13 @@
 #include <QFrame>
 #include <QMap>
 
+class CommitInfoPanel;
 class GitBase;
-class QStackedWidget;
-class DiffButton;
+class QPinnableTabWidget;
+class IDiffWidget;
 class QVBoxLayout;
 class CommitDiffWidget;
-class RevisionsCache;
+class GitCache;
 
 /*!
  \brief The DiffWidget class creates the layout to display the dif information for both files and commits.
@@ -71,8 +72,7 @@ public:
     \param cache The internal repository cache for the repository.
     \param parent The parent wiget if needed.
    */
-   explicit DiffWidget(const QSharedPointer<GitBase> git, QSharedPointer<RevisionsCache> cache,
-                       QWidget *parent = nullptr);
+   explicit DiffWidget(const QSharedPointer<GitBase> git, QSharedPointer<GitCache> cache, QWidget *parent = nullptr);
    /*!
     \brief Destructor
 
@@ -98,28 +98,36 @@ public:
     \param file The file to show the diff of.
     \return bool Returns true if the file diff was loaded correctly.
    */
-   bool loadFileDiff(const QString &sha, const QString &previousSha, const QString &file);
+   bool loadFileDiff(const QString &sha, const QString &previousSha, const QString &file, bool isCached);
    /*!
     \brief Loads a full commit diff.
 
     \param sha The base SHA.
     \param parentSha The SHA to compare to.
+    \return True if the load was successful, otherwise false.
    */
-   void loadCommitDiff(const QString &sha, const QString &parentSha);
+   bool loadCommitDiff(const QString &sha, const QString &parentSha);
 
 private:
    QSharedPointer<GitBase> mGit;
-   QSharedPointer<RevisionsCache> mCache;
-   QStackedWidget *centerStackedWidget = nullptr;
-   QMap<QString, QPair<QFrame *, DiffButton *>> mDiffButtons;
-   QVBoxLayout *mDiffButtonsContainer = nullptr;
+   QSharedPointer<GitCache> mCache;
+   CommitInfoPanel *mInfoPanelBase = nullptr;
+   CommitInfoPanel *mInfoPanelParent = nullptr;
+   QPinnableTabWidget *mCenterStackedWidget = nullptr;
+   QMap<QString, IDiffWidget *> mDiffWidgets;
    CommitDiffWidget *mCommitDiffWidget = nullptr;
 
    /*!
-    \brief When the user selectes a different diff from a different tab, it triggers an actionto change the current
-    DiffButton selection.
+    \brief When the user selectes a different diff from a different tab, it changes the information in the commit info
+    panel.
 
     \param index The new selected index.
    */
    void changeSelection(int index);
+
+   /**
+    * @brief onTabClosed Removes the IDiffWidget from the map.
+    * @param index The index to be closed.
+    */
+   void onTabClosed(int index);
 };

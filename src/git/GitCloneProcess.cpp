@@ -20,9 +20,18 @@ void GitCloneProcess::onReadyStandardError()
       const auto errStr = QString::fromUtf8(err);
       mErrorOutput += errStr;
 
-      if (!errStr.startsWith("remote: "))
+      if (errStr.contains("fatal:"))
       {
+          mCanceling = true;
+          emit signalCloningFailure(-1, errStr);
+      }
+      else if (!errStr.startsWith("remote: "))
+      {
+#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
+         auto infoList = errStr.split(",", Qt::SkipEmptyParts).first().split(":");
+#else
          auto infoList = errStr.split(",", QString::SkipEmptyParts).first().split(":");
+#endif
          const auto stepDesc = infoList.takeFirst();
          auto value = -1;
 

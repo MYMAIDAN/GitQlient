@@ -1,16 +1,19 @@
-#include "BranchesWidget.h"
+﻿#include "BranchesWidget.h"
 
 #include <BranchTreeWidget.h>
 #include <GitBase.h>
-#include <GitTags.h>
 #include <GitSubmodules.h>
 #include <GitStashes.h>
+#include <GitTags.h>
+#include <GitConfig.h>
 #include <BranchesViewDelegate.h>
 #include <ClickableFrame.h>
 #include <AddSubmoduleDlg.h>
 #include <StashesContextMenu.h>
-#include <RevisionsCache.h>
+#include <GitCache.h>
 #include <GitQlientBranchItemRole.h>
+#include <GitQlientSettings.h>
+#include <BranchesWidgetMinimal.h>
 
 #include <QApplication>
 #include <QVBoxLayout>
@@ -19,6 +22,7 @@
 #include <QLabel>
 #include <QMenu>
 #include <QHeaderView>
+#include <QPushButton>
 
 #include <QLogger.h>
 
@@ -44,7 +48,7 @@ QTreeWidgetItem *getChild(QTreeWidgetItem *parent, const QString &childName)
 }
 }
 
-BranchesWidget::BranchesWidget(const QSharedPointer<RevisionsCache> &cache, const QSharedPointer<GitBase> &git,
+BranchesWidget::BranchesWidget(const QSharedPointer<GitCache> &cache, const QSharedPointer<GitBase> &git,
                                QWidget *parent)
    : QFrame(parent)
    , mCache(cache)
@@ -59,6 +63,8 @@ BranchesWidget::BranchesWidget(const QSharedPointer<RevisionsCache> &cache, cons
    , mStashesArrow(new QLabel())
    , mSubmodulesCount(new QLabel("(0)"))
    , mSubmodulesArrow(new QLabel())
+   , mMinimize(new QPushButton())
+   , mMinimal(new BranchesWidgetMinimal(mCache, mGit))
 {
    setAttribute(Qt::WA_DeleteOnClose);
 
@@ -89,6 +95,19 @@ BranchesWidget::BranchesWidget(const QSharedPointer<RevisionsCache> &cache, cons
    tagsHeaderLayout->setContentsMargins(20, 9, 10, 9);
    tagsHeaderLayout->setSpacing(10);
 
+   const auto tagLayout = new QVBoxLayout();
+   tagLayout->setContentsMargins(QMargins());
+   tagLayout->setSpacing(0);
+   tagLayout->addWidget(tagsFrame);
+   tagLayout->addWidget(mTagsList);
+
+   GitQlientSettings settings;
+   if (const auto visible = settings.localValue(mGit->getGitQlientSettingsDir(), "TagsHeader", true).toBool(); !visible)
+   {
+      mTagsList->setVisible(!visible);
+      onTagsHeaderClicked();
+   }
+
    const auto tagsIcon = new QLabel();
    tagsIcon->setPixmap(QIcon(":/icons/tags").pixmap(QSize(15, 15)));
 
@@ -103,18 +122,25 @@ BranchesWidget::BranchesWidget(const QSharedPointer<RevisionsCache> &cache, cons
    mTagsList->setMouseTracking(true);
    mTagsList->setContextMenuPolicy(Qt::CustomContextMenu);
 
-   const auto tagLayout = new QVBoxLayout();
-   tagLayout->setContentsMargins(QMargins());
-   tagLayout->setSpacing(0);
-   tagLayout->addWidget(tagsFrame);
-   tagLayout->addWidget(mTagsList);
-
    /* TAGS END */
 
    /* STASHES */
 
    const auto stashFrame = new ClickableFrame();
    stashFrame->setObjectName("tagsFrame");
+
+   const auto stashLayout = new QVBoxLayout();
+   stashLayout->setContentsMargins(QMargins());
+   stashLayout->setSpacing(0);
+   stashLayout->addWidget(stashFrame);
+   stashLayout->addWidget(mStashesList);
+
+   if (const auto visible = settings.localValue(mGit->getGitQlientSettingsDir(), "StashesHeader", true).toBool();
+       !visible)
+   {
+      mStashesList->setVisible(!visible);
+      onStashesHeaderClicked();
+   }
 
    const auto stashHeaderLayout = new QHBoxLayout(stashFrame);
    stashHeaderLayout->setContentsMargins(20, 9, 10, 9);
@@ -134,16 +160,23 @@ BranchesWidget::BranchesWidget(const QSharedPointer<RevisionsCache> &cache, cons
    mStashesList->setMouseTracking(true);
    mStashesList->setContextMenuPolicy(Qt::CustomContextMenu);
 
-   const auto stashLayout = new QVBoxLayout();
-   stashLayout->setContentsMargins(QMargins());
-   stashLayout->setSpacing(0);
-   stashLayout->addWidget(stashFrame);
-   stashLayout->addWidget(mStashesList);
-
    /* STASHES END */
 
    const auto submoduleFrame = new ClickableFrame();
    submoduleFrame->setObjectName("tagsFrame");
+
+   const auto submoduleLayout = new QVBoxLayout();
+   submoduleLayout->setContentsMargins(QMargins());
+   submoduleLayout->setSpacing(0);
+   submoduleLayout->addWidget(submoduleFrame);
+   submoduleLayout->addWidget(mSubmodulesList);
+
+   if (const auto visible = settings.localValue(mGit->getGitQlientSettingsDir(), "SubmodulesHeader", true).toBool();
+       !visible)
+   {
+      mSubmodulesList->setVisible(!visible);
+      onSubmodulesHeaderClicked();
+   }
 
    const auto submoduleHeaderLayout = new QHBoxLayout(submoduleFrame);
    submoduleHeaderLayout->setContentsMargins(20, 9, 10, 9);
@@ -163,32 +196,60 @@ BranchesWidget::BranchesWidget(const QSharedPointer<RevisionsCache> &cache, cons
 
    mSubmodulesList->setMouseTracking(true);
    mSubmodulesList->setContextMenuPolicy(Qt::CustomContextMenu);
-   connect(mSubmodulesList, &QListWidget::itemDoubleClicked, this,
-           [this](QListWidgetItem *item) { emit signalOpenSubmodule(item->text()); });
-
-   const auto submoduleLayout = new QVBoxLayout();
-   submoduleLayout->setContentsMargins(QMargins());
-   submoduleLayout->setSpacing(0);
-   submoduleLayout->addWidget(submoduleFrame);
-   submoduleLayout->addWidget(mSubmodulesList);
+   connect(mSubmodulesList, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem *item) {
+      emit signalOpenSubmodule(mGit->getWorkingDir().append("/").append(item->text()));
+   });
 
    /* SUBMODULES START */
 
    /* SUBMODULES END */
 
-   const auto vLayout = new QVBoxLayout(this);
-   vLayout->setContentsMargins(QMargins());
+   const auto vLayout = new QVBoxLayout();
+   vLayout->setContentsMargins(0, 0, 10, 0);
+   vLayout->setSpacing(0);
    vLayout->addWidget(mLocalBranchesTree);
    vLayout->addWidget(mRemoteBranchesTree);
    vLayout->addLayout(tagLayout);
    vLayout->addLayout(stashLayout);
    vLayout->addLayout(submoduleLayout);
 
-   setLayout(vLayout);
+   mMinimize->setObjectName("MinimizeBtn");
+   mMinimize->setIcon(QIcon(":/icons/arrow_right"));
+   mMinimize->setToolTip(tr("Show minimalist view"));
+   connect(mMinimize, &QPushButton::clicked, this, &BranchesWidget::minimalView);
 
+   mFullBranchFrame = new QFrame();
+   mFullBranchFrame->setObjectName("FullBranchesWidget");
+   const auto mainBranchLayout = new QHBoxLayout(mFullBranchFrame);
+   mainBranchLayout->setContentsMargins(QMargins());
+   mainBranchLayout->setSpacing(0);
+   mainBranchLayout->addWidget(mMinimize);
+   mainBranchLayout->addLayout(vLayout);
+
+   const auto mainLayout = new QGridLayout(this);
+   mainLayout->setContentsMargins(QMargins());
+   mainLayout->setSpacing(10);
+   mainLayout->addWidget(mFullBranchFrame, 0, 0, 3, 1);
+   mainLayout->addItem(new QSpacerItem(1, 1, QSizePolicy::Fixed, QSizePolicy::Expanding), 0, 1);
+   mainLayout->addWidget(mMinimal, 1, 1);
+   mainLayout->addItem(new QSpacerItem(1, 1, QSizePolicy::Fixed, QSizePolicy::Expanding), 2, 1);
+
+   const auto isMinimalVisible
+       = settings.localValue(mGit->getGitQlientSettingsDir(), "MinimalBranchesView", false).toBool();
+   mFullBranchFrame->setVisible(!isMinimalVisible);
+   mMinimal->setVisible(isMinimalVisible);
+   connect(mMinimal, &BranchesWidgetMinimal::showFullBranchesView, this, &BranchesWidget::fullView);
+   connect(mMinimal, &BranchesWidgetMinimal::commitSelected, this, &BranchesWidget::signalSelectCommit);
+   connect(mMinimal, &BranchesWidgetMinimal::stashSelected, this, &BranchesWidget::onStashSelected);
+
+   /*
+   connect(mLocalBranchesTree, &BranchTreeWidget::signalRefreshPRsCache, mCache.get(),
+           &GitCache::refreshPRsCache);
+*/
    connect(mLocalBranchesTree, &BranchTreeWidget::signalSelectCommit, this, &BranchesWidget::signalSelectCommit);
    connect(mLocalBranchesTree, &BranchTreeWidget::signalSelectCommit, mRemoteBranchesTree,
            &BranchTreeWidget::clearSelection);
+   connect(mLocalBranchesTree, &BranchTreeWidget::signalFetchPerformed, this, &BranchesWidget::onFetchPerformed);
    connect(mLocalBranchesTree, &BranchTreeWidget::signalBranchesUpdated, this, &BranchesWidget::signalBranchesUpdated);
    connect(mLocalBranchesTree, &BranchTreeWidget::signalBranchCheckedOut, this,
            &BranchesWidget::signalBranchCheckedOut);
@@ -197,6 +258,7 @@ BranchesWidget::BranchesWidget(const QSharedPointer<RevisionsCache> &cache, cons
    connect(mRemoteBranchesTree, &BranchTreeWidget::signalSelectCommit, this, &BranchesWidget::signalSelectCommit);
    connect(mRemoteBranchesTree, &BranchTreeWidget::signalSelectCommit, mLocalBranchesTree,
            &BranchTreeWidget::clearSelection);
+   connect(mRemoteBranchesTree, &BranchTreeWidget::signalFetchPerformed, this, &BranchesWidget::onFetchPerformed);
    connect(mRemoteBranchesTree, &BranchTreeWidget::signalBranchesUpdated, this, &BranchesWidget::signalBranchesUpdated);
    connect(mRemoteBranchesTree, &BranchTreeWidget::signalBranchCheckedOut, this,
            &BranchesWidget::signalBranchCheckedOut);
@@ -217,6 +279,7 @@ void BranchesWidget::showBranches()
    QLog_Info("UI", QString("Loading branches data"));
 
    clear();
+   mMinimal->clearActions();
 
    QApplication::setOverrideCursor(QCursor(Qt::WaitCursor));
 
@@ -230,8 +293,13 @@ void BranchesWidget::showBranches()
       for (const auto &pair : branches)
       {
          for (const auto &branch : pair.second)
+         {
             if (!branch.contains("HEAD->"))
+            {
                processLocalBranch(pair.first, branch);
+               mMinimal->configureLocalMenu(pair.first, branch);
+            }
+         }
       }
 
       QLog_Info("UI", QString("... local branches processed"));
@@ -244,11 +312,16 @@ void BranchesWidget::showBranches()
       QLog_Info("UI", QString("Fetched {%1} remote branches").arg(branches.count()));
       QLog_Info("UI", QString("Processing remote branches..."));
 
-      for (const auto &pair : branches)
+      for (const auto &pair : qAsConst(branches))
       {
          for (const auto &branch : pair.second)
+         {
             if (!branch.contains("HEAD->"))
+            {
                processRemoteBranch(pair.first, branch);
+               mMinimal->configureRemoteMenu(pair.first, branch);
+            }
+         }
       }
 
       QLog_Info("UI", QString("... rmote branches processed"));
@@ -272,6 +345,41 @@ void BranchesWidget::clear()
    mStashesList->clear();
    mSubmodulesList->clear();
    blockSignals(false);
+}
+
+void BranchesWidget::fullView()
+{
+   mFullBranchFrame->setVisible(true);
+   mMinimal->setVisible(false);
+
+   GitQlientSettings settings;
+   settings.setLocalValue(mGit->getGitQlientSettingsDir(), "MinimalBranchesView", mMinimal->isVisible());
+}
+
+void BranchesWidget::returnToSavedView()
+{
+   GitQlientSettings settings;
+   const auto savedState = settings.localValue(mGit->getGitQlientSettingsDir(), "MinimalBranchesView", false).toBool();
+
+   if (savedState != mMinimal->isVisible())
+   {
+      mFullBranchFrame->setVisible(!savedState);
+      mMinimal->setVisible(savedState);
+   }
+}
+
+void BranchesWidget::minimalView()
+{
+   forceMinimalView();
+
+   GitQlientSettings settings;
+   settings.setLocalValue(mGit->getGitQlientSettingsDir(), "MinimalBranchesView", mMinimal->isVisible());
+}
+
+void BranchesWidget::forceMinimalView()
+{
+   mFullBranchFrame->setVisible(false);
+   mMinimal->setVisible(true);
 }
 
 void BranchesWidget::processLocalBranch(const QString &sha, QString branch)
@@ -418,32 +526,32 @@ void BranchesWidget::processRemoteBranch(const QString &sha, QString branch)
 
 void BranchesWidget::processTags()
 {
-   QVector<QString> localTags;
-   const auto tags = mCache->getTags();
+   const auto localTags = mCache->getTags(References::Type::LocalTag);
+   const auto remoteTags = mCache->getTags(References::Type::RemoteTag);
 
-   QLog_Info("UI", QString("Fetching {%1} tags").arg(tags.count()));
+   QLog_Info("UI", QString("Fetching {%1} tags").arg(localTags.count()));
 
-   for (const auto &tag : tags)
+   for (const auto &tag : localTags.toStdMap())
    {
-      for (auto tagName : tag.second)
+      auto tagName = tag.first;
+      const auto item = new QListWidgetItem();
+      item->setData(Qt::UserRole, tagName);
+      item->setData(Qt::UserRole + 1, true);
+      item->setData(Qt::UserRole + 2, tag.second);
+
+      if (!remoteTags.contains(tagName))
       {
-         const auto item = new QListWidgetItem();
-         item->setData(Qt::UserRole, tagName);
-         item->setData(Qt::UserRole + 1, true);
-         item->setData(Qt::UserRole + 2, tag.first);
-
-         if (localTags.contains(tagName))
-         {
-            tagName += " (local)";
-            item->setData(Qt::UserRole + 1, false);
-         }
-
-         item->setText(tagName);
-         mTagsList->addItem(item);
+         tagName += " (local)";
+         item->setData(Qt::UserRole + 1, false);
       }
+
+      item->setText(tagName);
+      mTagsList->addItem(item);
+
+      mMinimal->configureTagsMenu(tag.second, tagName);
    }
 
-   mTagsCount->setText(QString("(%1)").arg(tags.count()));
+   mTagsCount->setText(QString("(%1)").arg(localTags.count()));
 }
 
 void BranchesWidget::processStashes()
@@ -460,6 +568,7 @@ void BranchesWidget::processStashes()
       const auto item = new QListWidgetItem(stashDesc);
       item->setData(Qt::UserRole, stashId);
       mStashesList->addItem(item);
+      mMinimal->configureStashesMenu(stashId, stashDesc);
    }
 
    mStashesCount->setText(QString("(%1)").arg(stashes.count()));
@@ -473,7 +582,12 @@ void BranchesWidget::processSubmodules()
    QLog_Info("UI", QString("Fetching {%1} submodules").arg(submodules.count()));
 
    for (const auto &submodule : submodules)
+   {
       mSubmodulesList->addItem(submodule);
+      mMinimal->configureSubmodulesMenu(submodule);
+   }
+
+   mSubmodulesCount->setText('(' + QString::number(submodules.count()) + ')');
 }
 
 void BranchesWidget::adjustBranchesTree(BranchTreeWidget *treeWidget)
@@ -573,8 +687,9 @@ void BranchesWidget::showSubmodulesContextMenu(const QPoint &p)
       });
 
       const auto openSubmoduleAction = menu->addAction(tr("Open"));
-      connect(openSubmoduleAction, &QAction::triggered, this,
-              [this, submoduleName]() { emit signalOpenSubmodule(submoduleName); });
+      connect(openSubmoduleAction, &QAction::triggered, this, [this, submoduleName]() {
+         emit signalOpenSubmodule(mGit->getWorkingDir().append("/").append(submoduleName));
+      });
 
       /*
       const auto deleteSubmoduleAction = menu->addAction(tr("Delete"));
@@ -591,6 +706,9 @@ void BranchesWidget::onTagsHeaderClicked()
    const auto icon = QIcon(tagsAreVisible ? QString(":/icons/arrow_up") : QString(":/icons/arrow_down"));
    mTagArrow->setPixmap(icon.pixmap(QSize(15, 15)));
    mTagsList->setVisible(!tagsAreVisible);
+
+   GitQlientSettings settings;
+   settings.setLocalValue(mGit->getGitQlientSettingsDir(), "TagsHeader", !tagsAreVisible);
 }
 
 void BranchesWidget::onStashesHeaderClicked()
@@ -599,6 +717,9 @@ void BranchesWidget::onStashesHeaderClicked()
    const auto icon = QIcon(stashesAreVisible ? QString(":/icons/arrow_up") : QString(":/icons/arrow_down"));
    mStashesArrow->setPixmap(icon.pixmap(QSize(15, 15)));
    mStashesList->setVisible(!stashesAreVisible);
+
+   GitQlientSettings settings;
+   settings.setLocalValue(mGit->getGitQlientSettingsDir(), "StashesHeader", !stashesAreVisible);
 }
 
 void BranchesWidget::onSubmodulesHeaderClicked()
@@ -607,6 +728,9 @@ void BranchesWidget::onSubmodulesHeaderClicked()
    const auto icon = QIcon(submodulesAreVisible ? QString(":/icons/arrow_up") : QString(":/icons/arrow_down"));
    mSubmodulesArrow->setPixmap(icon.pixmap(QSize(15, 15)));
    mSubmodulesList->setVisible(!submodulesAreVisible);
+
+   GitQlientSettings settings;
+   settings.setLocalValue(mGit->getGitQlientSettingsDir(), "SubmodulesHeader", !submodulesAreVisible);
 }
 
 void BranchesWidget::onTagClicked(QListWidgetItem *item)
@@ -616,8 +740,21 @@ void BranchesWidget::onTagClicked(QListWidgetItem *item)
 
 void BranchesWidget::onStashClicked(QListWidgetItem *item)
 {
+   onStashSelected(item->data(Qt::UserRole).toString());
+}
+
+void BranchesWidget::onFetchPerformed()
+{
+   QScopedPointer<GitTags> gitTags(new GitTags(mGit));
+   const auto remoteTags = gitTags->getRemoteTags();
+
+   mCache->updateTags(remoteTags);
+}
+
+void BranchesWidget::onStashSelected(const QString &stashId)
+{
    QScopedPointer<GitTags> git(new GitTags(mGit));
-   const auto sha = git->getTagCommit(item->data(Qt::UserRole).toString()).output.toString();
+   const auto sha = git->getTagCommit(stashId).output.toString();
 
    emit signalSelectCommit(sha);
 }

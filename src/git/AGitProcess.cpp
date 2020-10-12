@@ -2,6 +2,7 @@
 
 #include <QTemporaryFile>
 #include <QTextStream>
+#include <GitQlientSettings.h>
 
 #include <QLogger.h>
 
@@ -47,7 +48,11 @@ QStringList splitArgList(const QString &cmd)
 
    // early exit the common case
    if (!(cmd.contains("$") || cmd.contains("\"") || cmd.contains("\'")))
+#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
+      return cmd.split(' ', Qt::SkipEmptyParts);
+#else
       return cmd.split(' ', QString::SkipEmptyParts);
+#endif
 
    // we have some work to do...
    // first find a possible separator
@@ -76,7 +81,12 @@ QStringList splitArgList(const QString &cmd)
 
    // QProcess::setArguments doesn't want quote
    // delimited arguments, so remove trailing quotes
+
+#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
+   auto sl = QStringList(newCmd.split(sepChar, Qt::SkipEmptyParts));
+#else
    auto sl = QStringList(newCmd.split(sepChar, QString::SkipEmptyParts));
+#endif
    QStringList::iterator it(sl.begin());
 
    for (; it != sl.end(); ++it)
@@ -104,6 +114,7 @@ AGitProcess::AGitProcess(const QString &workingDir)
 
 void AGitProcess::onCancel()
 {
+
    mCanceling = true;
 
    waitForFinished();
@@ -134,8 +145,11 @@ bool AGitProcess::execute(const QString &command)
       env << "GIT_TRACE=0"; // avoid choking on debug traces
       env << "GIT_FLUSH=0"; // skip the fflush() in 'git log'
 
+      GitQlientSettings settings;
+      const auto gitAlternative = settings.globalValue("gitLocation", "").toString();
+
       setEnvironment(env);
-      setProgram(arguments.takeFirst());
+      setProgram(gitAlternative.isEmpty() ? arguments.takeFirst() : gitAlternative);
       setArguments(arguments);
       start();
 
@@ -150,18 +164,21 @@ bool AGitProcess::execute(const QString &command)
    return processStarted;
 }
 
-void AGitProcess::onFinished(int, QProcess::ExitStatus exitStatus)
+void AGitProcess::onFinished(int exitCode, QProcess::ExitStatus exitStatus)
 {
    QLog_Debug("Git", QString("Process {%1} finished.").arg(mCommand));
 
    const auto errorOutput = readAllStandardError();
 
    mErrorOutput = QString::fromUtf8(errorOutput);
-   mRealError = exitStatus != QProcess::NormalExit || mCanceling || errorOutput.contains("error")
-       || errorOutput.toLower().contains("could not read username");
+   mRealError = exitStatus != QProcess::NormalExit || (exitStatus == QProcess::NormalExit && exitCode != 0)
+       || mCanceling || errorOutput.contains("error") || errorOutput.toLower().contains("could not read username");
 
    if (mRealError)
-      mRunOutput = mErrorOutput;
+   {
+      if (!mErrorOutput.isEmpty())
+         mRunOutput = !mErrorOutput.isEmpty();
+   }
    else
       mRunOutput.append(readAllStandardOutput() + mErrorOutput);
 }

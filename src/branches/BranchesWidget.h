@@ -30,7 +30,9 @@ class QListWidget;
 class QListWidgetItem;
 class QLabel;
 class GitBase;
-class RevisionsCache;
+class GitCache;
+class QPushButton;
+class BranchesWidgetMinimal;
 
 /*!
  \brief BranchesWidget is the widget that creates the layout that contains all the widgets related with the display of
@@ -85,7 +87,7 @@ public:
     \param git The git object to perform Git commands.
     \param parent The parent widget if needed.
    */
-   explicit BranchesWidget(const QSharedPointer<RevisionsCache> &cache, const QSharedPointer<GitBase> &git,
+   explicit BranchesWidget(const QSharedPointer<GitCache> &cache, const QSharedPointer<GitBase> &git,
                            QWidget *parent = nullptr);
    /*!
     \brief This method configures the widget gathering all the information regarding branches, tags, stashes and
@@ -98,9 +100,29 @@ public:
 
    */
    void clear();
+   /**
+    * @brief fullView Shows the full branches view.
+    */
+   void fullView();
+
+   /**
+    * @brief returnToSavedView Returns to the view mode previously saved. This methods bypasses the forceMinimalView.
+    * method.
+    */
+   void returnToSavedView();
+
+   /**
+    * @brief minimalView Shows the minimalistic branches view.
+    */
+   void minimalView();
+
+   /**
+    * @brief forceMinimalView Forces the minimal view but temporarily: id doesn't save the state.
+    */
+   void forceMinimalView();
 
 private:
-   QSharedPointer<RevisionsCache> mCache;
+   QSharedPointer<GitCache> mCache;
    QSharedPointer<GitBase> mGit;
    BranchTreeWidget *mLocalBranchesTree = nullptr;
    BranchTreeWidget *mRemoteBranchesTree = nullptr;
@@ -113,6 +135,9 @@ private:
    QLabel *mStashesArrow = nullptr;
    QLabel *mSubmodulesCount = nullptr;
    QLabel *mSubmodulesArrow = nullptr;
+   QPushButton *mMinimize = nullptr;
+   QFrame *mFullBranchFrame = nullptr;
+   BranchesWidgetMinimal *mMinimal = nullptr;
 
    /*!
     \brief Method that for a given \p branch process all the informatio and creates the item that will be stored in the
@@ -195,4 +220,16 @@ private:
     \param item The stash item from the stashes list.
    */
    void onStashClicked(QListWidgetItem *item);
+
+   /**
+    * @brief onFetchPerformed Updates the remote tags in the cache.
+    */
+   void onFetchPerformed();
+
+   /**
+    * @brief onStashSelected Gets the SHA for a given stash and notifies the UI that it should select it in the
+    * repository view.
+    * @param stash The stash name.
+    */
+   void onStashSelected(const QString &stashId);
 };

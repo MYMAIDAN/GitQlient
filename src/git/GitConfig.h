@@ -45,6 +45,7 @@ class GitConfig : public QObject
 
 signals:
    void signalCloningProgress(QString stepDescription, int value);
+   void signalCloningFailure(int error, QString failure);
 
 public:
    explicit GitConfig(QSharedPointer<GitBase> gitBase, QObject *parent = nullptr);
@@ -60,6 +61,9 @@ public:
    GitExecResult getLocalConfig() const;
    GitExecResult getGlobalConfig() const;
    GitExecResult getRemoteForBranch(const QString &branch);
+   GitExecResult getGitValue(const QString &key) const;
+   QString getServerUrl() const;
+   QPair<QString, QString> getCurrentRepoAndOwner() const;
 
 private:
    QSharedPointer<GitBase> mGitBase;

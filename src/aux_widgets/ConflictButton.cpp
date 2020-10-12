@@ -2,7 +2,6 @@
 
 #include <GitBase.h>
 #include <GitLocal.h>
-#include <GitQlientSettings.h>
 #include <QLogger.h>
 
 #include <QPushButton>
@@ -24,7 +23,7 @@ ConflictButton::ConflictButton(const QString &filename, bool inConflict, const Q
    mFile->setCheckable(true);
    mFile->setChecked(inConflict);
 
-   mEdit->setIcon(QIcon(":/icons/text-file"));
+   mEdit->setIcon(QIcon(":/icons/edit"));
    mEdit->setFixedSize(30, 30);
    mResolve->setIcon(QIcon(":/icons/check"));
    mResolve->setFixedSize(30, 30);
@@ -42,8 +41,8 @@ ConflictButton::ConflictButton(const QString &filename, bool inConflict, const Q
    mUpdate->setVisible(inConflict);
    mResolve->setVisible(inConflict);
 
-   connect(mFile, &QPushButton::toggled, this, &ConflictButton::toggled);
-   connect(mEdit, &QPushButton::clicked, this, &ConflictButton::openFileEditor);
+   connect(mFile, &QPushButton::clicked, this, &ConflictButton::clicked);
+   connect(mEdit, &QPushButton::clicked, this, [this] { emit signalEditFile(getFileName(), 0, 0); });
    connect(mResolve, &QPushButton::clicked, this, &ConflictButton::resolveConflict);
    connect(mUpdate, &QPushButton::clicked, this, [this]() { emit updateRequested(); });
 }
@@ -51,6 +50,11 @@ ConflictButton::ConflictButton(const QString &filename, bool inConflict, const Q
 void ConflictButton::setChecked(bool checked)
 {
    mFile->setChecked(checked);
+}
+
+QString ConflictButton::getFileName() const
+{
+   return mGit->getWorkingDir() + "/" + mFileName;
 }
 
 void ConflictButton::setInConflict(bool inConflict)
@@ -68,43 +72,5 @@ void ConflictButton::resolveConflict()
    {
       setInConflict(false);
       emit resolved();
-   }
-}
-
-void ConflictButton::openFileEditor()
-{
-   const auto fullPath = QString(mGit->getWorkingDir() + "/" + mFileName);
-
-   GitQlientSettings settings;
-
-   if (!settings.value("isGitQlient", false).toBool())
-      emit signalEditFile(fullPath, 0, 0);
-   else
-   {
-      const auto editor
-          = settings.value(GitQlientSettings::ExternalEditorKey, GitQlientSettings::ExternalEditorValue).toString();
-
-      auto processCmd = editor;
-
-      if (!editor.contains("%1"))
-         processCmd.append(" %1");
-
-      processCmd = processCmd.arg(fullPath);
-
-      const auto externalEditor = new QProcess();
-      connect(externalEditor, SIGNAL(finished(int, QProcess::ExitStatus)), externalEditor, SLOT(deleteLater()));
-
-      externalEditor->setWorkingDirectory(mGit->getWorkingDir());
-
-      externalEditor->start(processCmd);
-
-      if (!externalEditor->waitForStarted(10000))
-      {
-         QString text = QString("Cannot start external editor: %1.").arg(editor);
-
-         QLog_Error("UI", text);
-
-         delete externalEditor;
-      }
    }
 }

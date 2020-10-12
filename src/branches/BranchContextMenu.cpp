@@ -1,5 +1,6 @@
 #include "BranchContextMenu.h"
 
+#include <GitQlientStyles.h>
 #include <BranchDlg.h>
 #include <GitBranches.h>
 #include <GitBase.h>
@@ -20,13 +21,11 @@ BranchContextMenu::BranchContextMenu(BranchContextMenuConfig config, QWidget *pa
    {
       connect(addAction("Pull"), &QAction::triggered, this, &BranchContextMenu::pull);
       connect(addAction("Fetch"), &QAction::triggered, this, &BranchContextMenu::fetch);
+      connect(addAction("Push"), &QAction::triggered, this, &BranchContextMenu::push);
    }
 
    if (mConfig.currentBranch == mConfig.branchSelected)
-   {
-      connect(addAction("Push"), &QAction::triggered, this, &BranchContextMenu::push);
       connect(addAction("Push force"), &QAction::triggered, this, &BranchContextMenu::pushForce);
-   }
 
    addSeparator();
 
@@ -65,7 +64,15 @@ void BranchContextMenu::pull()
          emit signalPullConflict();
       }
       else
-         QMessageBox::critical(this, tr("Error while pulling"), errorMsg);
+      {
+         QMessageBox msgBox(QMessageBox::Critical, tr("Error while pulling"),
+                            QString("There were problems during the pull operation. Please, see the detailed "
+                                    "description for more information."),
+                            QMessageBox::Ok, this);
+         msgBox.setDetailedText(errorMsg);
+         msgBox.setStyleSheet(GitQlientStyles::getStyles());
+         msgBox.exec();
+      }
    }
 }
 
@@ -77,7 +84,10 @@ void BranchContextMenu::fetch()
    QApplication::restoreOverrideCursor();
 
    if (ret)
+   {
+      emit signalFetchPerformed();
       emit signalBranchesUpdated();
+   }
    else
       QMessageBox::critical(this, tr("Fetch failed"), tr("There were some problems while fetching. Please try again."));
 }
@@ -86,7 +96,8 @@ void BranchContextMenu::push()
 {
    QApplication::setOverrideCursor(QCursor(Qt::WaitCursor));
    QScopedPointer<GitRemote> git(new GitRemote(mConfig.mGit));
-   const auto ret = git->push();
+   const auto ret
+       = mConfig.currentBranch == mConfig.branchSelected ? git->push() : git->pushBranch(mConfig.branchSelected);
    QApplication::restoreOverrideCursor();
 
    if (ret.output.toString().contains("has no upstream branch"))
@@ -100,7 +111,15 @@ void BranchContextMenu::push()
    else if (ret.success)
       emit signalBranchesUpdated();
    else
-      QMessageBox::critical(this, tr("Push failed"), ret.output.toString());
+   {
+      QMessageBox msgBox(QMessageBox::Critical, tr("Error while pushing"),
+                         QString("There were problems during the push operation. Please, see the detailed description "
+                                 "for more information."),
+                         QMessageBox::Ok, this);
+      msgBox.setDetailedText(ret.output.toString());
+      msgBox.setStyleSheet(GitQlientStyles::getStyles());
+      msgBox.exec();
+   }
 }
 
 void BranchContextMenu::pushForce()
@@ -111,9 +130,20 @@ void BranchContextMenu::pushForce()
    QApplication::restoreOverrideCursor();
 
    if (ret.success)
+   {
+      emit signalRefreshPRsCache();
       emit signalBranchesUpdated();
+   }
    else
-      QMessageBox::critical(this, tr("Push force failed"), ret.output.toString());
+   {
+      QMessageBox msgBox(QMessageBox::Critical, tr("Error while pulling"),
+                         QString("There were problems during the pull operation. Please, see the detailed description "
+                                 "for more information."),
+                         QMessageBox::Ok, this);
+      msgBox.setDetailedText(ret.output.toString());
+      msgBox.setStyleSheet(GitQlientStyles::getStyles());
+      msgBox.exec();
+   }
 }
 
 void BranchContextMenu::createBranch()

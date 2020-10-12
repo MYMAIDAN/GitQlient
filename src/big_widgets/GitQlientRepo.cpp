@@ -1,6 +1,7 @@
 #include "GitQlientRepo.h"
 
 #include <GitQlientSettings.h>
+#include <GitTags.h>
 #include <Controls.h>
 #include <BranchesWidget.h>
 #include <CommitHistoryColumns.h>
@@ -8,17 +9,22 @@
 #include <QLogger.h>
 #include <BlameWidget.h>
 #include <CommitInfo.h>
-#include <ProgressDlg.h>
+#include <WaitingDlg.h>
 #include <GitConfigDlg.h>
 #include <Controls.h>
 #include <HistoryWidget.h>
 #include <DiffWidget.h>
 #include <MergeWidget.h>
-#include <RevisionsCache.h>
+#include <GitCache.h>
 #include <GitRepoLoader.h>
 #include <GitConfig.h>
 #include <GitBase.h>
 #include <GitHistory.h>
+#include <GitHubRestApi.h>
+#include <GitServerWidget.h>
+#include <GitServerCache.h>
+#include <ConfigData.h>
+#include <JenkinsWidget.h>
 
 #include <QTimer>
 #include <QDirIterator>
@@ -31,18 +37,23 @@
 #include <QStackedLayout>
 
 using namespace QLogger;
+using namespace GitServer;
+using namespace Jenkins;
 
 GitQlientRepo::GitQlientRepo(const QString &repoPath, QWidget *parent)
    : QFrame(parent)
-   , mGitQlientCache(new RevisionsCache())
+   , mGitQlientCache(new GitCache())
+   , mGitServerCache(new GitServerCache())
    , mGitBase(new GitBase(repoPath))
    , mGitLoader(new GitRepoLoader(mGitBase, mGitQlientCache))
-   , mHistoryWidget(new HistoryWidget(mGitQlientCache, mGitBase))
+   , mHistoryWidget(new HistoryWidget(mGitQlientCache, mGitBase, mGitServerCache))
    , mStackedLayout(new QStackedLayout())
-   , mControls(new Controls(mGitBase))
+   , mControls(new Controls(mGitQlientCache, mGitBase))
    , mDiffWidget(new DiffWidget(mGitBase, mGitQlientCache))
    , mBlameWidget(new BlameWidget(mGitQlientCache, mGitBase))
    , mMergeWidget(new MergeWidget(mGitQlientCache, mGitBase))
+   , mGitServerWidget(new GitServerWidget(mGitQlientCache, mGitBase, mGitServerCache))
+   , mJenkins(new JenkinsWidget(mGitBase))
    , mAutoFetch(new QTimer())
    , mAutoFilesUpdate(new QTimer())
 {
@@ -53,31 +64,46 @@ GitQlientRepo::GitQlientRepo(const QString &repoPath, QWidget *parent)
    setObjectName("mainWindow");
    setWindowTitle("GitQlient");
 
+   QScopedPointer<GitConfig> gitConfig(new GitConfig(mGitBase));
+   const auto serverUrl = gitConfig->getServerUrl();
+   const auto repoInfo = gitConfig->getCurrentRepoAndOwner();
+
+   mGitServerCache->init(serverUrl, repoInfo);
+
    mStackedLayout->addWidget(mHistoryWidget);
    mStackedLayout->addWidget(mDiffWidget);
    mStackedLayout->addWidget(mBlameWidget);
    mStackedLayout->addWidget(mMergeWidget);
-   showHistoryView();
+   mStackedLayout->addWidget(mGitServerWidget);
+   mStackedLayout->addWidget(mJenkins);
 
    const auto mainLayout = new QVBoxLayout(this);
    mainLayout->setSpacing(0);
-   mainLayout->setContentsMargins(10, 0, 10, 10);
+   mainLayout->setContentsMargins(10, 0, 0, 10);
    mainLayout->addWidget(mControls);
    mainLayout->addLayout(mStackedLayout);
 
-   mAutoFetch->setInterval(mConfig.mAutoFetchSecs * 1000);
-   mAutoFilesUpdate->setInterval(mConfig.mAutoFileUpdateSecs * 1000);
+   showHistoryView();
+
+   GitQlientSettings settings;
+   const auto fetchInterval = settings.localValue(mGitBase->getGitQlientSettingsDir(), "AutoFetch", 5).toInt();
+
+   mAutoFetch->setInterval(fetchInterval * 60 * 1000);
+   mAutoFilesUpdate->setInterval(15000);
 
    connect(mAutoFetch, &QTimer::timeout, mControls, &Controls::fetchAll);
    connect(mAutoFilesUpdate, &QTimer::timeout, this, &GitQlientRepo::updateUiFromWatcher);
 
+   connect(mControls, &Controls::signalFetchPerformed, this, &GitQlientRepo::updateTagsOnCache);
    connect(mControls, &Controls::signalGoRepo, this, &GitQlientRepo::showHistoryView);
    connect(mControls, &Controls::signalGoBlame, this, &GitQlientRepo::showBlameView);
    connect(mControls, &Controls::signalGoDiff, this, &GitQlientRepo::showDiffView);
    connect(mControls, &Controls::signalGoMerge, this, &GitQlientRepo::showMergeView);
+   connect(mControls, &Controls::signalGoServer, this, &GitQlientRepo::showGitServerView);
+   connect(mControls, &Controls::signalGoBuildSystem, this, &GitQlientRepo::showBuildSystemView);
    connect(mControls, &Controls::signalRepositoryUpdated, this, &GitQlientRepo::updateCache);
    connect(mControls, &Controls::signalPullConflict, mControls, &Controls::activateMergeWarning);
-   connect(mControls, &Controls::signalPullConflict, this, &GitQlientRepo::showPullConflict);
+   connect(mControls, &Controls::signalPullConflict, this, &GitQlientRepo::showWarningMerge);
 
    connect(mHistoryWidget, &HistoryWidget::signalEditFile, this, &GitQlientRepo::signalEditFile);
    connect(mHistoryWidget, &HistoryWidget::signalAllBranchesActive, mGitLoader.data(), &GitRepoLoader::setShowAll);
@@ -96,8 +122,9 @@ GitQlientRepo::GitQlientRepo(const QString &repoPath, QWidget *parent)
    connect(mHistoryWidget, &HistoryWidget::signalCherryPickConflict, mControls, &Controls::activateMergeWarning);
    connect(mHistoryWidget, &HistoryWidget::signalCherryPickConflict, this, &GitQlientRepo::showCherryPickConflict);
    connect(mHistoryWidget, &HistoryWidget::signalPullConflict, mControls, &Controls::activateMergeWarning);
-   connect(mHistoryWidget, &HistoryWidget::signalPullConflict, this, &GitQlientRepo::showPullConflict);
+   connect(mHistoryWidget, &HistoryWidget::signalPullConflict, this, &GitQlientRepo::showWarningMerge);
    connect(mHistoryWidget, &HistoryWidget::signalUpdateWip, this, &GitQlientRepo::updateWip);
+   connect(mHistoryWidget, &HistoryWidget::showPrDetailedView, this, &GitQlientRepo::showGitServerPrView);
 
    connect(mDiffWidget, &DiffWidget::signalShowFileHistory, this, &GitQlientRepo::showFileHistory);
    connect(mDiffWidget, &DiffWidget::signalDiffEmpty, mControls, &Controls::disableDiff);
@@ -112,17 +139,18 @@ GitQlientRepo::GitQlientRepo(const QString &repoPath, QWidget *parent)
    connect(mMergeWidget, &MergeWidget::signalMergeFinished, mControls, &Controls::disableMergeWarning);
    connect(mMergeWidget, &MergeWidget::signalEditFile, this, &GitQlientRepo::signalEditFile);
 
-   connect(mGitLoader.data(), &GitRepoLoader::signalLoadingStarted, this, &GitQlientRepo::createProgressDialog,
-           Qt::DirectConnection);
-   connect(mGitLoader.data(), &GitRepoLoader::signalLoadingStep, this, &GitQlientRepo::updateProgressDialog,
-           Qt::DirectConnection);
-   connect(mGitLoader.data(), &GitRepoLoader::signalLoadingFinished, this, &GitQlientRepo::onRepoLoadFinished,
-           Qt::DirectConnection);
+   connect(mJenkins, &JenkinsWidget::gotoBranch, this, &GitQlientRepo::focusHistoryOnBranch);
+   connect(mJenkins, &JenkinsWidget::gotoPullRequest, this, &GitQlientRepo::focusHistoryOnPr);
 
-   GitQlientSettings settings;
-   mGitLoader->setShowAll(settings.value("ShowAllBranches", true).toBool());
+   connect(mGitLoader.data(), &GitRepoLoader::signalLoadingStarted, this, &GitQlientRepo::createProgressDialog);
+   connect(mGitLoader.data(), &GitRepoLoader::signalLoadingFinished, this, &GitQlientRepo::onRepoLoadFinished);
 
-   setRepository(repoPath);
+   m_loaderThread = new QThread();
+   mGitLoader->moveToThread(m_loaderThread);
+   connect(this, &GitQlientRepo::signalLoadRepo, mGitLoader.data(), &GitRepoLoader::loadRepository);
+   m_loaderThread->start();
+
+   mGitLoader->setShowAll(settings.localValue(mGitBase->getGitQlientSettingsDir(), "ShowAllBranches", true).toBool());
 }
 
 GitQlientRepo::~GitQlientRepo()
@@ -130,21 +158,9 @@ GitQlientRepo::~GitQlientRepo()
    delete mAutoFetch;
    delete mAutoFilesUpdate;
    delete mGitWatcher;
-}
 
-void GitQlientRepo::setConfig(const GitQlientRepoConfig &config)
-{
-   QLog_Debug("UI", QString("Setting GitQlientRepo configuration."));
-
-   mConfig = config;
-
-   mAutoFetch->stop();
-   mAutoFetch->setInterval(mConfig.mAutoFetchSecs);
-   mAutoFetch->start();
-
-   mAutoFilesUpdate->stop();
-   mAutoFilesUpdate->setInterval(mConfig.mAutoFileUpdateSecs);
-   mAutoFilesUpdate->start();
+   m_loaderThread->exit();
+   m_loaderThread->deleteLater();
 }
 
 void GitQlientRepo::updateCache()
@@ -153,7 +169,7 @@ void GitQlientRepo::updateCache()
    {
       QLog_Debug("UI", QString("Updating the GitQlient UI"));
 
-      mGitLoader->loadRepository();
+      emit signalLoadRepo();
 
       mDiffWidget->reload();
    }
@@ -178,47 +194,11 @@ void GitQlientRepo::setRepository(const QString &newDir)
 
       mGitLoader->cancelAll();
 
-      const auto ok = mGitLoader->loadRepository();
+      emit signalLoadRepo();
 
-      if (ok)
-      {
-         GitQlientSettings settings;
-         settings.setProjectOpened(newDir);
-
-         mCurrentDir = mGitBase->getWorkingDir();
-         setWidgetsEnabled(true);
-
-         setWatcher();
-
-         mBlameWidget->init(newDir);
-
-         mControls->enableButtons(true);
-
-         mAutoFilesUpdate->start();
-
-         QScopedPointer<GitConfig> git(new GitConfig(mGitBase));
-
-         if (!git->getGlobalUserInfo().isValid() && !git->getLocalUserInfo().isValid())
-         {
-            QLog_Info("UI", QString("Configuring Git..."));
-
-            GitConfigDlg configDlg(mGitBase);
-
-            configDlg.exec();
-
-            QLog_Info("UI", QString("... Git configured!"));
-         }
-
-         QLog_Info("UI", "... repository loaded successfully");
-      }
-      else
-      {
-         QLog_Error("Git", QString("There was an error during the repository load!"));
-
-         mCurrentDir = "";
-         clearWindow();
-         setWidgetsEnabled(false);
-      }
+      mCurrentDir = newDir;
+      clearWindow();
+      setWidgetsEnabled(false);
    }
    else
    {
@@ -276,24 +256,12 @@ void GitQlientRepo::showFileHistory(const QString &fileName)
    showBlameView();
 }
 
-void GitQlientRepo::createProgressDialog(int total)
+void GitQlientRepo::createProgressDialog()
 {
-   if (!mProgressDlg)
+   if (!mWaitDlg)
    {
-      mProgressDlg = new ProgressDlg(tr("Loading repository..."), QString(), 0, total, false, true);
-      connect(mProgressDlg, &ProgressDlg::destroyed, this, [this]() { mProgressDlg = nullptr; });
-
-      mProgressDlg->show();
-
-      QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
-   }
-}
-
-void GitQlientRepo::updateProgressDialog(int step)
-{
-   if (mProgressDlg)
-   {
-      mProgressDlg->setValue(step);
+      mWaitDlg = new WaitingDlg(tr("Loading repository..."));
+      mWaitDlg->exec();
 
       QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
    }
@@ -301,18 +269,56 @@ void GitQlientRepo::updateProgressDialog(int step)
 
 void GitQlientRepo::onRepoLoadFinished()
 {
-   mProgressDlg->close();
+   if (!mIsInit)
+   {
+      updateTagsOnCache();
+
+      mIsInit = true;
+
+      mCurrentDir = mGitBase->getWorkingDir();
+
+      emit repoOpened(mCurrentDir);
+
+      setWidgetsEnabled(true);
+
+      setWatcher();
+
+      mBlameWidget->init(mCurrentDir);
+
+      mControls->enableButtons(true);
+
+      mAutoFilesUpdate->start();
+
+      QScopedPointer<GitConfig> git(new GitConfig(mGitBase));
+
+      if (!git->getGlobalUserInfo().isValid() && !git->getLocalUserInfo().isValid())
+      {
+         QLog_Info("UI", QString("Configuring Git..."));
+
+         GitConfigDlg configDlg(mGitBase);
+
+         configDlg.exec();
+
+         QLog_Info("UI", QString("... Git configured!"));
+      }
+
+      QLog_Info("UI", "... repository loaded successfully");
+   }
 
    const auto totalCommits = mGitQlientCache->count();
 
    mHistoryWidget->loadBranches();
    mHistoryWidget->onNewRevisions(totalCommits);
    mBlameWidget->onNewRevisions(totalCommits);
+
+   if (mWaitDlg)
+      mWaitDlg->close();
 }
 
-void GitQlientRepo::loadFileDiff(const QString &currentSha, const QString &previousSha, const QString &file)
+void GitQlientRepo::loadFileDiff(const QString &currentSha, const QString &previousSha, const QString &file,
+                                 bool isCached)
 {
-   const auto loaded = mDiffWidget->loadFileDiff(currentSha, previousSha, file);
+   const auto loaded = mDiffWidget->loadFileDiff(currentSha, previousSha, file, isCached);
 
    if (loaded)
    {
@@ -326,7 +332,7 @@ void GitQlientRepo::showHistoryView()
    mPreviousView = qMakePair(mControls->getCurrentSelectedButton(), mStackedLayout->currentWidget());
 
    mStackedLayout->setCurrentWidget(mHistoryWidget);
-   mControls->toggleButton(ControlsMainViews::HISTORY);
+   mControls->toggleButton(ControlsMainViews::History);
 }
 
 void GitQlientRepo::showBlameView()
@@ -334,7 +340,7 @@ void GitQlientRepo::showBlameView()
    mPreviousView = qMakePair(mControls->getCurrentSelectedButton(), mStackedLayout->currentWidget());
 
    mStackedLayout->setCurrentWidget(mBlameWidget);
-   mControls->toggleButton(ControlsMainViews::BLAME);
+   mControls->toggleButton(ControlsMainViews::Blame);
 }
 
 void GitQlientRepo::showDiffView()
@@ -342,7 +348,7 @@ void GitQlientRepo::showDiffView()
    mPreviousView = qMakePair(mControls->getCurrentSelectedButton(), mStackedLayout->currentWidget());
 
    mStackedLayout->setCurrentWidget(mDiffWidget);
-   mControls->toggleButton(ControlsMainViews::DIFF);
+   mControls->toggleButton(ControlsMainViews::Diff);
 }
 
 void GitQlientRepo::showWarningMerge()
@@ -390,7 +396,62 @@ void GitQlientRepo::showPullConflict()
 void GitQlientRepo::showMergeView()
 {
    mStackedLayout->setCurrentWidget(mMergeWidget);
-   mControls->toggleButton(ControlsMainViews::MERGE);
+   mControls->toggleButton(ControlsMainViews::Merge);
+}
+
+bool GitQlientRepo::configureGitServer() const
+{
+   bool isConfigured = false;
+
+   if (!mGitServerWidget->isConfigured())
+   {
+      QScopedPointer<GitConfig> gitConfig(new GitConfig(mGitBase));
+      const auto serverUrl = gitConfig->getServerUrl();
+      const auto repoInfo = gitConfig->getCurrentRepoAndOwner();
+
+      GitQlientSettings settings;
+      const auto user = settings.globalValue(QString("%1/user").arg(serverUrl)).toString();
+      const auto token = settings.globalValue(QString("%1/token").arg(serverUrl)).toString();
+
+      GitServer::ConfigData data;
+      data.user = user;
+      data.token = token;
+      data.serverUrl = serverUrl;
+      data.repoInfo = repoInfo;
+
+      isConfigured = mGitServerWidget->configure(data);
+   }
+   else
+      isConfigured = true;
+
+   return isConfigured;
+}
+
+void GitQlientRepo::showGitServerView()
+{
+   if (configureGitServer())
+   {
+      mStackedLayout->setCurrentWidget(mGitServerWidget);
+      mControls->toggleButton(ControlsMainViews::GitServer);
+   }
+   else
+      showPreviousView();
+}
+
+void GitQlientRepo::showGitServerPrView(int prNumber)
+{
+   if (configureGitServer())
+   {
+      showGitServerView();
+      mGitServerWidget->openPullRequest(prNumber);
+   }
+}
+
+void GitQlientRepo::showBuildSystemView()
+{
+   mJenkins->reload();
+   mStackedLayout->setCurrentWidget(mJenkins);
+   mControls->toggleButton(ControlsMainViews::BuildSystem);
 }
 
 void GitQlientRepo::showPreviousView()
@@ -406,21 +467,67 @@ void GitQlientRepo::updateWip()
    mHistoryWidget->updateUiFromWatcher();
 }
 
+void GitQlientRepo::updateTagsOnCache()
+{
+   QScopedPointer<GitTags> gitTags(new GitTags(mGitBase));
+   const auto remoteTags = gitTags->getRemoteTags();
+
+   mGitQlientCache->updateTags(remoteTags);
+}
+
+void GitQlientRepo::focusHistoryOnBranch(const QString &branch)
+{
+   auto found = false;
+   const auto fullBranch = QString("origin/%1").arg(branch);
+   const auto remoteBranches = mGitQlientCache->getBranches(References::Type::RemoteBranches);
+
+   for (const auto &remote : remoteBranches)
+   {
+      if (remote.second.contains(fullBranch))
+      {
+         found = true;
+         mHistoryWidget->focusOnCommit(remote.first);
+         showHistoryView();
+      }
+   }
+
+   if (!found)
+      QMessageBox::information(
+          this, tr("Branch not found"),
+          tr("The branch couldn't be found. Please, make sure you fetched and have the latest changes."));
+}
+
+void GitQlientRepo::focusHistoryOnPr(int prNumber)
+{
+   const auto pr = mGitServerCache->getPullRequest(prNumber);
+
+   mHistoryWidget->focusOnCommit(pr.state.sha);
+   showHistoryView();
+}
+
 void GitQlientRepo::openCommitDiff(const QString currentSha)
 {
    const auto rev = mGitQlientCache->getCommitInfo(currentSha);
+   const auto loaded = mDiffWidget->loadCommitDiff(currentSha, rev.parent(0));
 
-   mDiffWidget->loadCommitDiff(currentSha, rev.parent(0));
-   mControls->enableDiff();
+   if (loaded)
+   {
+      mControls->enableDiff();
 
-   showDiffView();
+      showDiffView();
+   }
 }
 
 void GitQlientRepo::openCommitCompareDiff(const QStringList &shas)
 {
-   mDiffWidget->loadCommitDiff(shas.last(), shas.first());
-   mControls->enableDiff();
-   showDiffView();
+   const auto loaded = mDiffWidget->loadCommitDiff(shas.last(), shas.first());
+
+   if (loaded)
+   {
+      mControls->enableDiff();
+
+      showDiffView();
+   }
 }
 
 void GitQlientRepo::changesCommitted(bool ok)

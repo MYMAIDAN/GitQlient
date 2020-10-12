@@ -21,7 +21,7 @@ QString GitQlientStyles::getStyles()
    if (stylesFile.open(QIODevice::ReadOnly))
    {
       GitQlientSettings settings;
-      const auto colorSchema = settings.value("colorSchema", "dark").toString();
+      const auto colorSchema = settings.globalValue("colorSchema", "dark").toString();
       QFile colorsFile(QString(":/colors_%1").arg(colorSchema));
       QString colorsCss;
 
@@ -43,7 +43,7 @@ QColor GitQlientStyles::getTextColor()
 {
    auto textColor = QColor("white");
    GitQlientSettings settings;
-   const auto colorSchema = settings.value("colorSchema", "dark").toString();
+   const auto colorSchema = settings.globalValue("colorSchema", "dark").toString();
 
    if (colorSchema == "bright")
       textColor = "black";
@@ -54,15 +54,12 @@ QColor GitQlientStyles::getTextColor()
 QColor GitQlientStyles::getGraphSelectionColor()
 {
    GitQlientSettings settings;
-   const auto colorSchema = settings.value("colorSchema", "dark").toString();
+   const auto colorSchema = settings.globalValue("colorSchema", "dark").toString();
 
    QColor c;
 
    if (colorSchema == "dark")
-   {
-      c.setNamedColor("#404142");
-      c.setAlphaF(0.75);
-   }
+      c.setNamedColor("#505152");
    else
       c.setNamedColor("#C6C6C7");
 
@@ -72,15 +69,12 @@ QColor GitQlientStyles::getGraphSelectionColor()
 QColor GitQlientStyles::getGraphHoverColor()
 {
    GitQlientSettings settings;
-   const auto colorSchema = settings.value("colorSchema", "dark").toString();
+   const auto colorSchema = settings.globalValue("colorSchema", "dark").toString();
 
    QColor c;
 
    if (colorSchema == "dark")
-   {
       c.setNamedColor("#404142");
-      c.setAlphaF(0.4);
-   }
    else
       c.setNamedColor("#EFEFEF");
 
@@ -90,10 +84,10 @@ QColor GitQlientStyles::getGraphHoverColor()
 QColor GitQlientStyles::getBackgroundColor()
 {
    GitQlientSettings settings;
-   const auto colorSchema = settings.value("colorSchema", "dark").toString();
+   const auto colorSchema = settings.globalValue("colorSchema", "dark").toString();
 
    QColor c;
-   c.setNamedColor(colorSchema == "dark" ? "#2E2F30" : "white");
+   c.setNamedColor(colorSchema == "dark" ? QString("#2E2F30") : QString("white"));
 
    return c;
 }
@@ -101,48 +95,50 @@ QColor GitQlientStyles::getBackgroundColor()
 QColor GitQlientStyles::getTabColor()
 {
    GitQlientSettings settings;
-   const auto colorSchema = settings.value("colorSchema", "dark").toString();
+   const auto colorSchema = settings.globalValue("colorSchema", "dark").toString();
 
    QColor c;
-   c.setNamedColor(colorSchema == "dark" ? "#404142" : "white");
+   c.setNamedColor(colorSchema == "dark" ? QString("#404142") : QString("white"));
 
    return c;
 }
 
 QColor GitQlientStyles::getBlue()
 {
-   static QColor blue("#579BD5");
-   return blue;
+   GitQlientSettings settings;
+   const auto colorSchema = settings.globalValue("colorSchema", "dark").toString();
+
+   QColor c;
+   c.setNamedColor(QString::fromUtf8(colorSchema == "dark" ? "#579BD5" : "#325CC7"));
+
+   return c;
 }
 
 QColor GitQlientStyles::getRed()
 {
-   static QColor red("#FF5555");
-   return red;
+   return QColor("#FF2222");
 }
 
 QColor GitQlientStyles::getGreen()
 {
-   static QColor green("#8DC944");
-   return green;
+   return QColor("#65952B");
 }
 
 QColor GitQlientStyles::getOrange()
 {
-   static QColor orange("#FFB86C");
-   return orange;
+   return QColor("#FF9320");
+}
+
+QColor GitQlientStyles::getGitQlientOrange()
+{
+   return QColor("#D89000");
 }
 
 std::array<QColor, GitQlientStyles::kBranchColors> GitQlientStyles::getBranchColors()
 {
-   static std::array<QColor, kBranchColors> colors { getTextColor(),
-                                                     getRed(),
-                                                     getBlue(),
-                                                     getGreen(),
-                                                     getOrange(),
-                                                     QColor("#848484") /* grey */,
-                                                     QColor("#FF79C6") /* pink */,
-                                                     QColor("#CD9077") /* pastel */ };
+   static std::array<QColor, kBranchColors> colors { { getTextColor(), getRed(), getBlue(), getGreen(), getOrange(),
+                                                       QColor("#848484") /* grey */, QColor("#FF79C6") /* pink */,
+                                                       QColor("#CD9077") /* pastel */ } };
 
    return colors;
 }

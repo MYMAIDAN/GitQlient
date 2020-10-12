@@ -1,6 +1,7 @@
 #include "GitSubmodules.h"
 
 #include <GitBase.h>
+
 #include <QLogger.h>
 
 using namespace QLogger;
@@ -31,14 +32,18 @@ bool GitSubmodules::submoduleAdd(const QString &url, const QString &name)
 {
    QLog_Debug("Git", QString("Executing submoduleAdd: {%1} {%2}").arg(url, name));
 
-   return mGitBase->run(QString("git submodule add %1 %2").arg(url, name)).success;
+   const auto ret = mGitBase->run(QString("git submodule add %1 %2").arg(url, name)).success;
+
+   return ret;
 }
 
 bool GitSubmodules::submoduleUpdate(const QString &)
 {
    QLog_Debug("Git", QString("Executing submoduleUpdate"));
 
-   return mGitBase->run("git submodule update --init --recursive").success;
+   const auto ret = mGitBase->run("git submodule update --init --recursive").success;
+
+   return ret;
 }
 
 bool GitSubmodules::submoduleRemove(const QString &)

@@ -25,17 +25,18 @@
 
 #include <QWidget>
 
-class RevisionsCache;
+class GitCache;
 class GitBase;
 class QLabel;
 class FileListWidget;
+class CommitInfoPanel;
 
 class CommitInfoWidget : public QWidget
 {
    Q_OBJECT
 
 signals:
-   void signalOpenFileCommit(const QString &currentSha, const QString &previousSha, const QString &file);
+   void signalOpenFileCommit(const QString &currentSha, const QString &previousSha, const QString &file, bool isCached);
    void signalOpenFileContextMenu(const QString &, int);
    void signalShowFileHistory(const QString &fileName);
 
@@ -48,7 +49,7 @@ signals:
    void signalEditFile(const QString &fileName, int line, int column);
 
 public:
-   explicit CommitInfoWidget(const QSharedPointer<RevisionsCache> &cache, const QSharedPointer<GitBase> &git,
+   explicit CommitInfoWidget(const QSharedPointer<GitCache> &cache, const QSharedPointer<GitBase> &git,
                              QWidget *parent = nullptr);
 
    void configure(const QString &sha);
@@ -56,16 +57,10 @@ public:
    void clear();
 
 private:
-   QSharedPointer<RevisionsCache> mCache;
+   QSharedPointer<GitCache> mCache;
    QSharedPointer<GitBase> mGit;
    QString mCurrentSha;
    QString mParentSha;
-   QLabel *labelSha = nullptr;
-   QLabel *labelTitle = nullptr;
-   QLabel *labelDescription = nullptr;
-   QLabel *labelAuthor = nullptr;
-   QLabel *labelDateTime = nullptr;
-   QLabel *labelEmail = nullptr;
+   CommitInfoPanel *mInfoPanel = nullptr;
    FileListWidget *fileListWidget = nullptr;
-   QLabel *labelModCount = nullptr;
 };

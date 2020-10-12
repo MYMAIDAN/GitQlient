@@ -1,5 +1,6 @@
 #include "BranchTreeWidget.h"
 
+#include <GitQlientStyles.h>
 #include <GitBranches.h>
 #include <GitBase.h>
 #include <BranchContextMenu.h>
@@ -25,20 +26,24 @@ BranchTreeWidget::BranchTreeWidget(const QSharedPointer<GitBase> &git, QWidget *
 
 void BranchTreeWidget::showBranchesContextMenu(const QPoint &pos)
 {
-   const auto item = itemAt(pos);
-
-   if (item)
+   if (const auto item = itemAt(pos); item != nullptr)
    {
-      auto currentBranch = mGit->getCurrentBranch();
       auto selectedBranch = item->data(0, FullNameRole).toString();
 
-      const auto menu = new BranchContextMenu({ currentBranch, selectedBranch, mLocal, mGit }, this);
-      connect(menu, &BranchContextMenu::signalBranchesUpdated, this, &BranchTreeWidget::signalBranchesUpdated);
-      connect(menu, &BranchContextMenu::signalCheckoutBranch, this, [this, item]() { checkoutBranch(item); });
-      connect(menu, &BranchContextMenu::signalMergeRequired, this, &BranchTreeWidget::signalMergeRequired);
-      connect(menu, &BranchContextMenu::signalPullConflict, this, &BranchTreeWidget::signalPullConflict);
+      if (!selectedBranch.isEmpty())
+      {
+         auto currentBranch = mGit->getCurrentBranch();
 
-      menu->exec(viewport()->mapToGlobal(pos));
+         const auto menu = new BranchContextMenu({ currentBranch, selectedBranch, mLocal, mGit }, this);
+         connect(menu, &BranchContextMenu::signalRefreshPRsCache, this, &BranchTreeWidget::signalRefreshPRsCache);
+         connect(menu, &BranchContextMenu::signalFetchPerformed, this, &BranchTreeWidget::signalFetchPerformed);
+         connect(menu, &BranchContextMenu::signalBranchesUpdated, this, &BranchTreeWidget::signalBranchesUpdated);
+         connect(menu, &BranchContextMenu::signalCheckoutBranch, this, [this, item]() { checkoutBranch(item); });
+         connect(menu, &BranchContextMenu::signalMergeRequired, this, &BranchTreeWidget::signalMergeRequired);
+         connect(menu, &BranchContextMenu::signalPullConflict, this, &BranchTreeWidget::signalPullConflict);
+
+         menu->exec(viewport()->mapToGlobal(pos));
+      }
    }
 }
 
@@ -83,7 +88,15 @@ void BranchTreeWidget::checkoutBranch(QTreeWidgetItem *item)
                emit signalBranchCheckedOut();
          }
          else
-            QMessageBox::critical(this, tr("Checkout branch error"), output);
+         {
+            QMessageBox msgBox(QMessageBox::Critical, tr("Error while checking out"),
+                               QString("There were problems during the checkout operation. Please, see the detailed "
+                                       "description for more information."),
+                               QMessageBox::Ok, this);
+            msgBox.setDetailedText(output);
+            msgBox.setStyleSheet(GitQlientStyles::getStyles());
+            msgBox.exec();
+         }
       }
    }
 }

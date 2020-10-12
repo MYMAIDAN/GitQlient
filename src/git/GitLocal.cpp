@@ -1,7 +1,11 @@
 #include "GitLocal.h"
 
 #include <GitBase.h>
+#include <GitQlientSettings.h>
+
 #include <QLogger.h>
+
+#include <QProcess>
 
 using namespace QLogger;
 
@@ -21,25 +25,40 @@ GitLocal::GitLocal(const QSharedPointer<GitBase> &gitBase)
 {
 }
 
+GitExecResult GitLocal::stageFile(const QString &fileName) const
+{
+   QLog_Debug("Git", QString("Executing stageFile: {%1}").arg(fileName));
+
+   const auto ret = mGitBase->run(QString("git add %1").arg(fileName));
+
+   return ret;
+}
+
 GitExecResult GitLocal::cherryPickCommit(const QString &sha) const
 {
    QLog_Debug("Git", QString("Executing cherryPickCommit: {%1}").arg(sha));
 
-   return mGitBase->run(QString("git cherry-pick %1").arg(sha));
+   const auto ret = mGitBase->run(QString("git cherry-pick %1").arg(sha));
+
+   return ret;
 }
 
 GitExecResult GitLocal::cherryPickAbort() const
 {
    QLog_Debug("Git", QString("Aborting cherryPick"));
 
-   return mGitBase->run("git cherry-pick --abort");
+   const auto ret = mGitBase->run("git cherry-pick --abort");
+
+   return ret;
 }
 
 GitExecResult GitLocal::cherryPickContinue() const
 {
    QLog_Debug("Git", QString("Applying cherryPick"));
 
-   return mGitBase->run("git cherry-pick --continue");
+   const auto ret = mGitBase->run("git cherry-pick --continue");
+
+   return ret;
 }
 
 GitExecResult GitLocal::checkoutCommit(const QString &sha) const
@@ -54,11 +73,9 @@ GitExecResult GitLocal::checkoutCommit(const QString &sha) const
    return ret;
 }
 
-GitExecResult GitLocal::markFileAsResolved(const QString &fileName) const
+GitExecResult GitLocal::markFileAsResolved(const QString &fileName)
 {
-   QLog_Debug("Git", QString("Executing markFileAsResolved: {%1}").arg(fileName));
-
-   const auto ret = mGitBase->run(QString("git add %1").arg(fileName));
+   const auto ret = stageFile(fileName);
 
    if (ret.success)
       emit signalWipUpdated();
@@ -77,17 +94,21 @@ bool GitLocal::checkoutFile(const QString &fileName) const
 
    QLog_Debug("Git", QString("Executing checkoutFile: {%1}").arg(fileName));
 
-   return mGitBase->run(QString("git checkout %1").arg(fileName)).success;
+   const auto ret = mGitBase->run(QString("git checkout %1").arg(fileName)).success;
+
+   return ret;
 }
 
 GitExecResult GitLocal::resetFile(const QString &fileName) const
 {
    QLog_Debug("Git", QString("Executing resetFile: {%1}").arg(fileName));
 
-   return mGitBase->run(QString("git reset %1").arg(fileName));
+   const auto ret = mGitBase->run(QString("git reset %1").arg(fileName));
+
+   return ret;
 }
 
-bool GitLocal::resetCommit(const QString &sha, CommitResetType type) const
+bool GitLocal::resetCommit(const QString &sha, CommitResetType type)
 {
    QString typeStr;
 
@@ -126,23 +147,20 @@ GitExecResult GitLocal::commitFiles(QStringList &selFiles, const RevisionFiles &
          notSel.append(fp);
    }
 
-   if (!notSel.empty())
-   {
-      const auto ret = mGitBase->run("git reset -- " + quote(notSel));
-
-      if (!ret.success)
-         return ret;
-   }
-
    // call git reset to remove not selected files from index
    const auto updIdx = updateIndex(allCommitFiles, selFiles);
 
    if (!updIdx.success)
+   {
+
       return updIdx;
+   }
 
    QLog_Debug("Git", QString("Commiting files"));
 
-   return mGitBase->run(QString("git commit -m \"%1\"").arg(msg));
+   const auto ret = mGitBase->run(QString("git commit -m \"%1\"").arg(msg));
+
+   return ret;
 }
 
 GitExecResult GitLocal::ammendCommit(const QStringList &selFiles, const RevisionFiles &allCommitFiles,
@@ -153,23 +171,10 @@ GitExecResult GitLocal::ammendCommit(const QStringList &selFiles, const Revision
    for (auto i = 0; i < allCommitFiles.count(); ++i)
    {
       const QString &fp = allCommitFiles.getFile(i);
-      if (selFiles.indexOf(fp) == -1 && allCommitFiles.statusCmp(i, RevisionFiles::IN_INDEX))
+      if (selFiles.indexOf(fp) == -1 && allCommitFiles.statusCmp(i, RevisionFiles::IN_INDEX)
+          && !allCommitFiles.statusCmp(i, RevisionFiles::DELETED))
          notSel.append(fp);
    }
-
-   if (!notSel.empty())
-   {
-      const auto ret = mGitBase->run("git reset -- " + quote(notSel));
-
-      if (!ret.success)
-         return ret;
-   }
-
-   // call git reset to remove not selected files from index
-   const auto updIdx = updateIndex(allCommitFiles, selFiles);
-
-   if (!updIdx.success)
-      return updIdx;
 
    QLog_Debug("Git", QString("Amending files"));
 
@@ -178,12 +183,14 @@ GitExecResult GitLocal::ammendCommit(const QStringList &selFiles, const Revision
    if (!author.isEmpty())
       cmtOptions.append(QString(" --author \"%1\"").arg(author));
 
-   return mGitBase->run(QString("git commit --amend" + cmtOptions + " -m \"%1\"").arg(msg));
+   const auto ret = mGitBase->run(QString("git commit --amend" + cmtOptions + " -m \"%1\"").arg(msg));
+
+   return ret;
 }
 
 GitExecResult GitLocal::updateIndex(const RevisionFiles &files, const QStringList &selFiles) const
 {
-   QStringList toAdd, toRemove;
+   QStringList toRemove;
 
    for (const auto &file : selFiles)
    {
@@ -191,8 +198,6 @@ GitExecResult GitLocal::updateIndex(const RevisionFiles &files, const QStringLis
 
       if (index != -1 && files.statusCmp(index, RevisionFiles::DELETED))
          toRemove << file;
-      else
-         toAdd << file;
    }
 
    if (!toRemove.isEmpty())
@@ -200,16 +205,13 @@ GitExecResult GitLocal::updateIndex(const RevisionFiles &files, const QStringLis
       const auto ret = mGitBase->run("git rm --cached --ignore-unmatch -- " + quote(toRemove));
 
       if (!ret.success)
+      {
+
          return ret;
+      }
    }
 
-   if (!toAdd.isEmpty())
-   {
-      const auto ret = mGitBase->run("git add -- " + quote(toAdd));
+   const auto ret = GitExecResult(true, "Indexes updated");
 
-      if (!ret.success)
-         return ret;
-   }
-
-   return GitExecResult(true, "Indexes updated");
+   return ret;
 }

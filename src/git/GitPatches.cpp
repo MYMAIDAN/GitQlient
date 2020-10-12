@@ -1,11 +1,11 @@
 #include "GitPatches.h"
 
-#include <QLogger.h>
 #include <GitBase.h>
-
-#include <QFile>
+#include <QLogger.h>
 
 using namespace QLogger;
+
+#include <QFile>
 
 GitPatches::GitPatches(const QSharedPointer<GitBase> &gitBase)
    : mGitBase(gitBase)
@@ -14,6 +14,7 @@ GitPatches::GitPatches(const QSharedPointer<GitBase> &gitBase)
 
 GitExecResult GitPatches::exportPatch(const QStringList &shaList)
 {
+
    QLog_Debug("Git", QString("Executing exportPatch: {%1}").arg(shaList.join(",")));
 
    auto val = 1;
@@ -48,6 +49,7 @@ GitExecResult GitPatches::exportPatch(const QStringList &shaList)
 
 bool GitPatches::applyPatch(const QString &fileName, bool asCommit)
 {
+
    QLog_Debug("Git",
               QString("Executing applyPatch: {%1} %2").arg(fileName, asCommit ? QString("as commit.") : QString()));
 
@@ -55,4 +57,11 @@ bool GitPatches::applyPatch(const QString &fileName, bool asCommit)
    const auto ret = mGitBase->run(QString("%1 %2").arg(cmd, fileName));
 
    return ret.success;
+}
+
+GitExecResult GitPatches::stagePatch(const QString &fileName) const
+{
+   QLog_Debug("Git", QString("Executing stagePatch: {%1}").arg(fileName));
+
+   return mGitBase->run(QString("git apply --cached %1").arg(fileName));
 }

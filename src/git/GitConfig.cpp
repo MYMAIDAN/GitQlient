@@ -2,6 +2,7 @@
 
 #include <GitBase.h>
 #include <GitCloneProcess.h>
+
 #include <QLogger.h>
 
 using namespace QLogger;
@@ -48,7 +49,9 @@ GitExecResult GitConfig::setGlobalData(const QString &key, const QString &value)
 {
    QLog_Debug("Git", QString("Configuring global key {%1} with value {%2}").arg(key, value));
 
-   return mGitBase->run(QString("git config --global %1 \"%2\"").arg(key, value));
+   const auto ret = mGitBase->run(QString("git config --global %1 \"%2\"").arg(key, value));
+
+   return ret;
 }
 
 GitUserInfo GitConfig::getLocalUserInfo() const
@@ -80,10 +83,11 @@ void GitConfig::setLocalUserInfo(const GitUserInfo &info)
 
 GitExecResult GitConfig::setLocalData(const QString &key, const QString &value)
 {
-
    QLog_Debug("Git", QString("Configuring local key {%1} with value {%2}").arg(key, value));
 
-   return mGitBase->run(QString("git config --local %1 \"%2\"").arg(key, value));
+   const auto ret = mGitBase->run(QString("git config --local %1 \"%2\"").arg(key, value));
+
+   return ret;
 }
 
 GitExecResult GitConfig::clone(const QString &url, const QString &fullPath)
@@ -92,6 +96,8 @@ GitExecResult GitConfig::clone(const QString &url, const QString &fullPath)
 
    const auto asyncRun = new GitCloneProcess(mGitBase->getWorkingDir());
    connect(asyncRun, &GitCloneProcess::signalProgress, this, &GitConfig::signalCloningProgress, Qt::DirectConnection);
+   connect(asyncRun, &GitCloneProcess::signalCloningFailure, this, &GitConfig::signalCloningFailure,
+           Qt::DirectConnection);
 
    mGitBase->setWorkingDir(fullPath);
 
@@ -114,14 +120,18 @@ GitExecResult GitConfig::getLocalConfig() const
 {
    QLog_Debug("Git", QString("Getting local config"));
 
-   return mGitBase->run("git config --local --list");
+   const auto ret = mGitBase->run("git config --local --list");
+
+   return ret;
 }
 
 GitExecResult GitConfig::getGlobalConfig() const
 {
    QLog_Debug("Git", QString("Getting global config"));
 
-   return mGitBase->run("git config --global --list");
+   const auto ret = mGitBase->run("git config --global --list");
+
+   return ret;
 }
 
 GitExecResult GitConfig::getRemoteForBranch(const QString &branch)
@@ -132,7 +142,11 @@ GitExecResult GitConfig::getRemoteForBranch(const QString &branch)
 
    if (config.success)
    {
+#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
+      const auto values = config.output.toString().split('\n', Qt::SkipEmptyParts);
+#else
       const auto values = config.output.toString().split('\n', QString::SkipEmptyParts);
+#endif
       const auto configKey = QString("branch.%1.remote=").arg(branch);
       QString configValue;
 
@@ -146,8 +160,64 @@ GitExecResult GitConfig::getRemoteForBranch(const QString &branch)
       }
 
       if (!configValue.isEmpty())
+      {
+
          return { true, configValue };
+      }
    }
 
    return GitExecResult();
+}
+
+GitExecResult GitConfig::getGitValue(const QString &key) const
+{
+   QLog_Debug("Git", QString("Getting value for config key {%1}").arg(key));
+
+   const auto ret = mGitBase->run(QString("git config --get %1").arg(key));
+
+   return ret;
+}
+
+QString GitConfig::getServerUrl() const
+{
+   auto serverUrl = getGitValue("remote.origin.url").output.toString().trimmed();
+
+   if (serverUrl.startsWith("git@"))
+   {
+      serverUrl.remove("git@");
+      serverUrl.replace(":", "/");
+   }
+   else if (serverUrl.startsWith("https://"))
+   {
+      serverUrl.remove("https://");
+   }
+
+   serverUrl = serverUrl.mid(0, serverUrl.indexOf("/"));
+
+   return serverUrl;
+}
+
+QPair<QString, QString> GitConfig::getCurrentRepoAndOwner() const
+{
+   auto serverUrl = getGitValue("remote.origin.url").output.toString().trimmed();
+   QString repo;
+
+   if (serverUrl.startsWith("git@"))
+   {
+      serverUrl.remove("git@");
+      repo = serverUrl.mid(serverUrl.lastIndexOf(":") + 1);
+      serverUrl.replace(":", "/");
+   }
+   else if (serverUrl.startsWith("https://"))
+   {
+      serverUrl.remove("https://");
+      repo = serverUrl.mid(serverUrl.indexOf("/") + 1);
+   }
+
+   serverUrl = serverUrl.mid(0, serverUrl.indexOf("/"));
+   repo.remove(".git");
+
+   const auto parts = repo.split("/");
+
+   return qMakePair(parts.constFirst(), parts.constLast());
 }

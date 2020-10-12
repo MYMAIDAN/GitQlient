@@ -1,6 +1,7 @@
 #include "GitTags.h"
 
 #include <GitBase.h>
+
 #include <QLogger.h>
 
 using namespace QLogger;
@@ -10,21 +11,29 @@ GitTags::GitTags(const QSharedPointer<GitBase> &gitBase)
 {
 }
 
-QVector<QString> GitTags::getTags() const
+QMap<QString, QString> GitTags::getRemoteTags() const
 {
-   QLog_Debug("Git", QString("Executing getTags"));
 
-   const auto ret = mGitBase->run("git tag");
+   QLog_Debug("Git", QString("Executing getRemoteTags"));
 
-   QVector<QString> tags;
+   const auto ret = mGitBase->run("git ls-remote --tags");
+
+   QMap<QString, QString> tags;
 
    if (ret.success)
    {
       const auto tagsTmp = ret.output.toString().split("\n");
 
       for (const auto &tag : tagsTmp)
-         if (tag != "\n" && !tag.isEmpty())
-            tags.append(tag);
+      {
+         if (tag != "\n" && !tag.isEmpty() && tag.contains("^{}"))
+         {
+            const auto sha = tag.split('\t').constFirst();
+            const auto tagName = tag.split('\t').last().remove("refs/tags/").remove("^{}");
+
+            tags.insert(tagName, sha);
+         }
+      }
    }
 
    return tags;
@@ -32,6 +41,7 @@ QVector<QString> GitTags::getTags() const
 
 QVector<QString> GitTags::getLocalTags() const
 {
+
    QLog_Debug("Git", QString("Executing getLocalTags"));
 
    const auto ret = mGitBase->run("git push --tags --dry-run");
@@ -52,13 +62,17 @@ QVector<QString> GitTags::getLocalTags() const
 
 GitExecResult GitTags::addTag(const QString &tagName, const QString &tagMessage, const QString &sha)
 {
+
    QLog_Debug("Git", QString("Executing addTag: {%1}").arg(tagName));
 
-   return mGitBase->run(QString("git tag -a %1 %2 -m \"%3\"").arg(tagName, sha, tagMessage));
+   const auto ret = mGitBase->run(QString("git tag -a %1 %2 -m \"%3\"").arg(tagName, sha, tagMessage));
+
+   return ret;
 }
 
 GitExecResult GitTags::removeTag(const QString &tagName, bool remote)
 {
+
    QLog_Debug("Git", QString("Executing removeTag: {%1}").arg(tagName));
 
    GitExecResult ret;
@@ -74,13 +88,17 @@ GitExecResult GitTags::removeTag(const QString &tagName, bool remote)
 
 GitExecResult GitTags::pushTag(const QString &tagName)
 {
+
    QLog_Debug("Git", QString("Executing pushTag: {%1}").arg(tagName));
 
-   return mGitBase->run(QString("git push origin %1").arg(tagName));
+   const auto ret = mGitBase->run(QString("git push origin %1").arg(tagName));
+
+   return ret;
 }
 
 GitExecResult GitTags::getTagCommit(const QString &tagName)
 {
+
    QLog_Debug("Git", QString("Executing getTagCommit: {%1}").arg(tagName));
 
    const auto ret = mGitBase->run(QString("git rev-list -n 1 %1").arg(tagName));

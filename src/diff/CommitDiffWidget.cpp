@@ -1,12 +1,12 @@
 #include "CommitDiffWidget.h"
 
 #include <FileListWidget.h>
-#include <RevisionsCache.h>
+#include <GitCache.h>
 
 #include <QVBoxLayout>
 #include <QLabel>
 
-CommitDiffWidget::CommitDiffWidget(QSharedPointer<GitBase> git, QSharedPointer<RevisionsCache> cache, QWidget *parent)
+CommitDiffWidget::CommitDiffWidget(QSharedPointer<GitBase> git, QSharedPointer<GitCache> cache, QWidget *parent)
    : QFrame(parent)
    , mGit(git)
    , mCache(cache)
@@ -25,8 +25,9 @@ CommitDiffWidget::CommitDiffWidget(QSharedPointer<GitBase> git, QSharedPointer<R
    layout->setSpacing(10);
    layout->addWidget(fileListWidget);
 
-   connect(fileListWidget, &FileListWidget::itemDoubleClicked, this,
-           [this](QListWidgetItem *item) { emit signalOpenFileCommit(mFirstShaStr, mSecondShaStr, item->text()); });
+   connect(fileListWidget, &FileListWidget::itemDoubleClicked, this, [this](QListWidgetItem *item) {
+      emit signalOpenFileCommit(mFirstShaStr, mSecondShaStr, item->text(), false);
+   });
    connect(fileListWidget, &FileListWidget::signalShowFileHistory, this, &CommitDiffWidget::signalShowFileHistory);
    connect(fileListWidget, &FileListWidget::signalEditFile, this, &CommitDiffWidget::signalEditFile);
 }
@@ -34,20 +35,7 @@ CommitDiffWidget::CommitDiffWidget(QSharedPointer<GitBase> git, QSharedPointer<R
 void CommitDiffWidget::configure(const QString &firstSha, const QString &secondSha)
 {
    mFirstShaStr = firstSha;
-
-   if (mFirstShaStr != CommitInfo::ZERO_SHA)
-   {
-      const auto c = mCache->getCommitInfo(mFirstShaStr);
-      const auto dateStr = QDateTime::fromSecsSinceEpoch(c.authorDate().toUInt()).toString("dd MMM yyyy hh:mm");
-   }
-
    mSecondShaStr = secondSha;
-
-   if (mFirstShaStr != CommitInfo::ZERO_SHA)
-   {
-      const auto c = mCache->getCommitInfo(mSecondShaStr);
-      const auto dateStr = QDateTime::fromSecsSinceEpoch(c.authorDate().toUInt()).toString("dd MMM yyyy hh:mm");
-   }
 
    fileListWidget->insertFiles(mFirstShaStr, mSecondShaStr);
 }

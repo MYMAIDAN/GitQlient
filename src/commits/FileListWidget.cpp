@@ -5,7 +5,7 @@
 #include <FileListDelegate.h>
 #include <GitHistory.h>
 #include <GitQlientStyles.h>
-#include <RevisionsCache.h>
+#include <GitCache.h>
 #include <GitBase.h>
 
 #include <QApplication>
@@ -17,7 +17,7 @@
 #include <QMenu>
 #include <QItemDelegate>
 
-FileListWidget::FileListWidget(const QSharedPointer<GitBase> &git, QSharedPointer<RevisionsCache> cache, QWidget *p)
+FileListWidget::FileListWidget(const QSharedPointer<GitBase> &git, QSharedPointer<GitCache> cache, QWidget *p)
    : QListWidget(p)
    , mGit(git)
    , mCache(std::move(cache))
@@ -48,7 +48,7 @@ void FileListWidget::showContextMenu(const QPoint &pos)
    if (item)
    {
       const auto fileName = item->data(Qt::DisplayRole).toString();
-      const auto menu = new FileContextMenu(fileName, this);
+      const auto menu = new FileContextMenu(fileName, mCurrentSha == CommitInfo::ZERO_SHA, this);
       connect(menu, &FileContextMenu::signalShowFileHistory, this,
               [this, fileName]() { emit signalShowFileHistory(fileName); });
       connect(menu, &FileContextMenu::signalOpenFileDiff, this,
@@ -65,17 +65,19 @@ void FileListWidget::insertFiles(const QString &currentSha, const QString &compa
 
    RevisionFiles files;
 
-   if (mCache->containsRevisionFile(currentSha, compareToSha))
-      files = mCache->getRevisionFile(currentSha, compareToSha);
-   else if (!compareToSha.isEmpty())
+   mCurrentSha = currentSha;
+
+   if (mCache->containsRevisionFile(mCurrentSha, compareToSha))
+      files = mCache->getRevisionFile(mCurrentSha, compareToSha);
+   else
    {
       QScopedPointer<GitHistory> git(new GitHistory(mGit));
-      const auto ret = git->getDiffFiles(currentSha, compareToSha);
+      const auto ret = git->getDiffFiles(mCurrentSha, compareToSha);
 
       if (ret.success)
       {
          files = mCache->parseDiff(ret.output.toString());
-         mCache->insertRevisionFile(currentSha, compareToSha, files);
+         mCache->insertRevisionFile(mCurrentSha, compareToSha, files);
       }
    }
 

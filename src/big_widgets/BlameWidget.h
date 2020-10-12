@@ -26,7 +26,7 @@
 #include <QFrame>
 #include <QMap>
 
-class RevisionsCache;
+class GitCache;
 class GitBase;
 class QFileSystemModel;
 class FileBlameWidget;
@@ -62,7 +62,7 @@ signals:
     * @param parentSha The previous sha
     * @param file The full path of the file to diff
     */
-   void showFileDiff(const QString &sha, const QString &parentSha, const QString &file);
+   void showFileDiff(const QString &sha, const QString &parentSha, const QString &file, bool isCached);
 
    /**
     * @brief Signal triggered when the user wants to see the diff of the selected SHA compared to its previous one.
@@ -78,7 +78,7 @@ public:
     * @param git The Git object to execute git commands.
     * @param parent The parent widget if needed.
     */
-   explicit BlameWidget(const QSharedPointer<RevisionsCache> &cache, const QSharedPointer<GitBase> &git,
+   explicit BlameWidget(const QSharedPointer<GitCache> &cache, const QSharedPointer<GitBase> &git,
                         QWidget *parent = nullptr);
    /**
     * @brief Destructor.
@@ -108,7 +108,7 @@ public:
    void onNewRevisions(int totalCommits);
 
 private:
-   QSharedPointer<RevisionsCache> mCache;
+   QSharedPointer<GitCache> mCache;
    QSharedPointer<GitBase> mGit;
    QFileSystemModel *fileSystemModel = nullptr;
    CommitHistoryModel *mRepoModel = nullptr;

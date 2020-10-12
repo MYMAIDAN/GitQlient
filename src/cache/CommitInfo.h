@@ -45,17 +45,19 @@ public:
    };
 
    CommitInfo() = default;
-   explicit CommitInfo(const QString &sha, const QStringList &parents, const QString &author, long long secsSinceEpoch,
-                       const QString &log, const QString &longLog);
-   explicit CommitInfo(const QByteArray &b);
+   explicit CommitInfo(const QString sha, const QStringList &parents, const QChar &boundary, const QString &commiter,
+                       const QDateTime &commitDate, const QString &author, const QString &log,
+                       const QString &longLog = QString(), bool isSigned = false, const QString &gpgKey = QString());
    bool operator==(const CommitInfo &commit) const;
    bool operator!=(const CommitInfo &commit) const;
 
    QString getFieldStr(CommitInfo::Field field) const;
+
+   void setBoundary(QChar info) { mBoundaryInfo = std::move(info); }
    bool isBoundary() const { return mBoundaryInfo == '-'; }
-   int parentsCount() const { return mParentsSha.count(); }
-   QString parent(int idx) const { return mParentsSha.count() > idx ? mParentsSha.at(idx) : QString(); }
-   QStringList parents() const { return mParentsSha; }
+   int parentsCount() const;
+   QString parent(int idx) const;
+   QStringList parents() const;
 
    QString sha() const { return mSha; }
    QString committer() const { return mCommitter; }
@@ -79,7 +81,17 @@ public:
    QStringList getReferences(References::Type type) const { return mReferences.getReferences(type); }
    bool hasReferences() const { return !mReferences.isEmpty(); }
 
+   void addChildReference(CommitInfo *commit) { mChilds.insert(commit->sha(), commit); }
+   QList<CommitInfo *> getChilds() const { return mChilds.values(); }
+   bool hasChilds() const { return !mChilds.empty(); }
+
+   void clearReferences() { mReferences.clear(); }
+
+   bool isSigned() const { return mSigned; }
+   QString getGpgKey() const { return mGpgKey; }
+
    static const QString ZERO_SHA;
+   static const QString INIT_SHA;
 
 private:
    QChar mBoundaryInfo;
@@ -93,4 +105,7 @@ private:
    QString mDiff;
    QVector<Lane> mLanes;
    References mReferences;
+   QMap<QString, CommitInfo *> mChilds;
+   bool mSigned = false;
+   QString mGpgKey;
 };

@@ -8,11 +8,26 @@
 using namespace QLogger;
 
 #include <QDir>
+#include <QFileInfo>
 
 GitBase::GitBase(const QString &workingDirectory, QObject *parent)
    : QObject(parent)
    , mWorkingDirectory(workingDirectory)
+   , mGitDirectory(mWorkingDirectory + "/.git")
 {
+   QFileInfo fileInfo(mGitDirectory);
+
+   if (fileInfo.isFile())
+   {
+      QFile f(fileInfo.filePath());
+
+      if (f.open(QIODevice::ReadOnly))
+      {
+         auto path = f.readAll().split(':').last().trimmed();
+         mGitDirectory = mWorkingDirectory + "/" + path;
+         f.close();
+      }
+   }
 }
 
 QString GitBase::getWorkingDir() const
@@ -25,8 +40,14 @@ void GitBase::setWorkingDir(const QString &workingDir)
    mWorkingDirectory = workingDir;
 }
 
+QString GitBase::getGitQlientSettingsDir() const
+{
+   return mGitDirectory;
+}
+
 GitExecResult GitBase::run(const QString &cmd) const
 {
+
    GitSyncProcess p(mWorkingDirectory);
    connect(this, &GitBase::cancelAllProcesses, &p, &AGitProcess::onCancel);
 
@@ -49,20 +70,24 @@ GitExecResult GitBase::run(const QString &cmd) const
 
 bool GitBase::runAsync(const QString &cmd) const
 {
+
    const auto p = new GitAsyncProcess(mWorkingDirectory);
    connect(this, &GitBase::cancelAllProcesses, p, &AGitProcess::onCancel);
    connect(p, &GitAsyncProcess::signalDataReady, this, &GitBase::signalResultReady);
 
-   return p->run(cmd).success;
+   const auto ret = p->run(cmd);
+
+   return ret.success;
 }
 
 void GitBase::updateCurrentBranch()
 {
+
    QLog_Trace("Git", "Updating the current branch");
 
    const auto ret = run("git rev-parse --abbrev-ref HEAD");
 
-   mCurrentBranch = ret.success ? ret.output.toString().trimmed() : QString();
+   mCurrentBranch = ret.success ? ret.output.toString().trimmed().remove("heads/") : QString();
 }
 
 QString GitBase::getCurrentBranch()
@@ -77,5 +102,10 @@ QString GitBase::getCurrentBranch()
 
 GitExecResult GitBase::getLastCommit() const
 {
-   return run("git rev-parse HEAD");
+
+   QLog_Trace("Git", "Executing getLastCommit");
+
+   const auto ret = run("git rev-parse HEAD");
+
+   return ret;
 }

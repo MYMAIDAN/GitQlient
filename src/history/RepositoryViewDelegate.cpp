@@ -1,5 +1,6 @@
 ﻿#include "RepositoryViewDelegate.h"
 
+#include <GitServerCache.h>
 #include <GitQlientStyles.h>
 #include <GitLocal.h>
 #include <Lane.h>
@@ -8,18 +9,31 @@
 #include <CommitHistoryColumns.h>
 #include <CommitHistoryView.h>
 #include <CommitHistoryModel.h>
-#include <RevisionsCache.h>
+#include <GitCache.h>
 #include <GitBase.h>
+#include <PullRequest.h>
 
 #include <QSortFilterProxyModel>
 #include <QPainter>
+#include <QPainterPath>
+#include <QEvent>
+#include <QDesktopServices>
+#include <QUrl>
+#include <QToolTip>
+#include <QApplication>
+#include <QClipboard>
+
+using namespace GitServer;
 
 static const int MIN_VIEW_WIDTH_PX = 480;
 
-RepositoryViewDelegate::RepositoryViewDelegate(const QSharedPointer<RevisionsCache> &cache,
-                                               const QSharedPointer<GitBase> &git, CommitHistoryView *view)
+RepositoryViewDelegate::RepositoryViewDelegate(const QSharedPointer<GitCache> &cache,
+                                               const QSharedPointer<GitBase> &git,
+                                               const QSharedPointer<GitServerCache> &gitServerCache,
+                                               CommitHistoryView *view)
    : mCache(cache)
    , mGit(git)
+   , mGitServerCache(gitServerCache)
    , mView(view)
 {
 }
@@ -45,28 +59,65 @@ void RepositoryViewDelegate::paint(QPainter *p, const QStyleOptionViewItem &opt,
    if (commit.sha().isEmpty())
       return;
 
-   if (index.column() == static_cast<int>(CommitHistoryColumns::GRAPH))
+   if (index.column() == static_cast<int>(CommitHistoryColumns::Graph))
       paintGraph(p, newOpt, commit);
-   else if (index.column() == static_cast<int>(CommitHistoryColumns::LOG))
+   else if (index.column() == static_cast<int>(CommitHistoryColumns::Log))
       paintLog(p, newOpt, commit, index.data().toString());
    else
    {
+
       p->setPen(GitQlientStyles::getTextColor());
       newOpt.rect.setX(newOpt.rect.x() + 10);
 
+      QTextOption textalignment(Qt::AlignLeft | Qt::AlignVCenter);
       auto text = index.data().toString();
 
-      if (index.column() == static_cast<int>(CommitHistoryColumns::SHA))
+      if (index.column() == static_cast<int>(CommitHistoryColumns::Date))
       {
-         newOpt.font.setPointSize(10);
-         newOpt.font.setFamily("Ubuntu Mono");
+         textalignment = QTextOption(Qt::AlignRight | Qt::AlignVCenter);
+         const auto prev = QDateTime::fromString(mView->indexAbove(index).data().toString(), "dd MMM yyyy hh:mm");
+         const auto current = QDateTime::fromString(text, "dd MMM yyyy hh:mm");
+
+         if (current.date() == prev.date())
+            text = current.toString("hh:mm");
+         else
+            text = current.toString("dd MMM yyyy - hh:mm");
+
+         newOpt.rect.setWidth(newOpt.rect.width() - 5);
+      }
+      else if (index.column() == static_cast<int>(CommitHistoryColumns::Sha))
+      {
+         newOpt.font.setPointSize(8);
+         newOpt.font.setFamily("DejaVu Sans Mono");
          text = text.left(8);
+      }
+      else if (index.column() == static_cast<int>(CommitHistoryColumns::Author) && commit.isSigned())
+      {
+         static const auto size = 15;
+         static const auto offset = 5;
+         QPixmap pic(":/icons/signed");
+         pic = pic.scaled(size, size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+
+         const auto inc = (newOpt.rect.height() - size) / 2;
+
+         p->drawPixmap(QRect(newOpt.rect.x(), newOpt.rect.y() + inc, size, size), pic);
+
+         newOpt.rect.setX(newOpt.rect.x() + size + offset);
       }
 
       QFontMetrics fm(newOpt.font);
       p->setFont(newOpt.font);
-      p->drawText(newOpt.rect, fm.elidedText(text, Qt::ElideRight, newOpt.rect.width()),
-                  QTextOption(Qt::AlignLeft | Qt::AlignVCenter));
+
+      if (const auto cursorColumn = mView->indexAt(mView->mapFromGlobal(QCursor::pos())).column();
+          newOpt.state & QStyle::State_MouseOver && cursorColumn == index.column()
+          && cursorColumn == static_cast<int>(CommitHistoryColumns::Sha))
+      {
+         QFont font = newOpt.font;
+         font.setUnderline(true);
+         p->setFont(font);
+      }
+
+      p->drawText(newOpt.rect, fm.elidedText(text, Qt::ElideRight, newOpt.rect.width()), textalignment);
    }
 }
 
@@ -75,9 +126,35 @@ QSize RepositoryViewDelegate::sizeHint(const QStyleOptionViewItem &, const QMode
    return QSize(LANE_WIDTH, ROW_HEIGHT);
 }
 
+bool RepositoryViewDelegate::editorEvent(QEvent *event, QAbstractItemModel *model, const QStyleOptionViewItem &option,
+                                         const QModelIndex &index)
+{
+   const auto cursorColumn = mView->indexAt(mView->mapFromGlobal(QCursor::pos())).column();
+
+   if (event->type() == QEvent::MouseButtonPress && cursorColumn == index.column()
+       && cursorColumn == static_cast<int>(CommitHistoryColumns::Sha))
+   {
+      mColumnPressed = cursorColumn;
+      return true;
+   }
+   else if (event->type() == QEvent::MouseButtonRelease && cursorColumn == index.column() && mColumnPressed != -1)
+   {
+      if (cursorColumn == static_cast<int>(CommitHistoryColumns::Sha))
+      {
+         QApplication::clipboard()->setText(index.data().toString());
+         QToolTip::showText(QCursor::pos(), tr("Copied!"), mView);
+      }
+
+      mColumnPressed = -1;
+      return true;
+   }
+
+   return QStyledItemDelegate::editorEvent(event, model, option, index);
+}
+
 void RepositoryViewDelegate::paintGraphLane(QPainter *p, const Lane &lane, bool laneHeadPresent, int x1, int x2,
                                             const QColor &col, const QColor &activeCol, const QColor &mergeColor,
-                                            bool isWip) const
+                                            bool isWip, bool hasChilds) const
 {
    const auto padding = 2;
    x1 += padding;
@@ -127,29 +204,41 @@ void RepositoryViewDelegate::paintGraphLane(QPainter *p, const Lane &lane, bool 
    }
 
    // vertical line
-   switch (lane.getType())
+   if (!(isWip && !hasChilds))
    {
-      case LaneType::ACTIVE:
-      case LaneType::NOT_ACTIVE:
-      case LaneType::MERGE_FORK:
-      case LaneType::MERGE_FORK_R:
-      case LaneType::MERGE_FORK_L:
-      case LaneType::JOIN:
-      case LaneType::JOIN_R:
-      case LaneType::JOIN_L:
-      case LaneType::CROSS:
-         p->drawLine(m, 0, m, 2 * h);
-         break;
-      case LaneType::HEAD_L:
-      case LaneType::BRANCH:
+      if (!isWip && !hasChilds
+          && (lane.getType() == LaneType::HEAD || lane.getType() == LaneType::INITIAL
+              || lane.getType() == LaneType::BRANCH || lane.getType() == LaneType::MERGE_FORK
+              || lane.getType() == LaneType::MERGE_FORK_R || lane.getType() == LaneType::MERGE_FORK_L
+              || lane.getType() == LaneType::ACTIVE))
          p->drawLine(m, h, m, 2 * h);
-         break;
-      case LaneType::TAIL_L:
-      case LaneType::INITIAL:
-         p->drawLine(m, 0, m, h);
-         break;
-      default:
-         break;
+      else
+      {
+         switch (lane.getType())
+         {
+            case LaneType::ACTIVE:
+            case LaneType::NOT_ACTIVE:
+            case LaneType::MERGE_FORK:
+            case LaneType::MERGE_FORK_R:
+            case LaneType::MERGE_FORK_L:
+            case LaneType::JOIN:
+            case LaneType::JOIN_R:
+            case LaneType::JOIN_L:
+            case LaneType::CROSS:
+               p->drawLine(m, 0, m, 2 * h);
+               break;
+            case LaneType::HEAD_L:
+            case LaneType::BRANCH:
+               p->drawLine(m, h, m, 2 * h);
+               break;
+            case LaneType::TAIL_L:
+            case LaneType::INITIAL:
+               p->drawLine(m, 0, m, h);
+               break;
+            default:
+               break;
+         }
+      }
    }
 
    // center symbol, e.g. rect or ellipse
@@ -213,8 +302,8 @@ void RepositoryViewDelegate::paintGraphLane(QPainter *p, const Lane &lane, bool 
 QColor RepositoryViewDelegate::getMergeColor(const Lane &currentLane, const CommitInfo &commit, int currentLaneIndex,
                                              const QColor &defaultColor, bool &isSet) const
 {
-   auto mergeColor
-       = GitQlientStyles::getBranchColorAt((commit.getLanesCount() - 1) % GitQlientStyles::getTotalBranchColors());
+   auto mergeColor = defaultColor;
+   //= GitQlientStyles::getBranchColorAt((commit.getLanesCount() - 1) % GitQlientStyles::getTotalBranchColors());
 
    switch (currentLane.getType())
    {
@@ -255,48 +344,62 @@ void RepositoryViewDelegate::paintGraph(QPainter *p, const QStyleOptionViewItem 
    if (mView->hasActiveFilter())
    {
       const auto activeColor = GitQlientStyles::getBranchColorAt(0);
-      paintGraphLane(p, LaneType::ACTIVE, false, 0, LANE_WIDTH, activeColor, activeColor, activeColor, false);
+      paintGraphLane(p, LaneType::ACTIVE, false, 0, LANE_WIDTH, activeColor, activeColor, activeColor, false,
+                     commit.hasChilds());
    }
    else
    {
-      const auto laneNum = commit.getLanesCount();
-      const auto activeLane = commit.getActiveLane();
-      const auto activeColor = GitQlientStyles::getBranchColorAt(activeLane % GitQlientStyles::getTotalBranchColors());
-      const auto isWip = commit.sha() == CommitInfo::ZERO_SHA;
-      auto x1 = 0;
-      auto isSet = false;
-      auto laneHeadPresent = false;
-      auto mergeColor = GitQlientStyles::getBranchColorAt((laneNum - 1) % GitQlientStyles::getTotalBranchColors());
-
-      for (auto i = laneNum - 1, x2 = LANE_WIDTH * laneNum; i >= 0; --i, x2 -= LANE_WIDTH)
+      if (commit.sha() == CommitInfo::ZERO_SHA)
       {
-         x1 = x2 - LANE_WIDTH;
+         const auto activeColor = GitQlientStyles::getBranchColorAt(0);
+         QColor color = activeColor;
 
-         auto currentLane = commit.getLane(i);
+         if (mCache->pendingLocalChanges())
+            color = GitQlientStyles::getGitQlientOrange();
 
-         if (!laneHeadPresent && i < laneNum - 1)
+         paintGraphLane(p, LaneType::BRANCH, false, 0, LANE_WIDTH, color, activeColor, activeColor, true,
+                        commit.parentsCount() != 0);
+      }
+      else
+      {
+         const auto laneNum = commit.getLanesCount();
+         const auto activeLane = commit.getActiveLane();
+         const auto activeColor
+             = GitQlientStyles::getBranchColorAt(activeLane % GitQlientStyles::getTotalBranchColors());
+         auto x1 = 0;
+         auto isSet = false;
+         auto laneHeadPresent = false;
+         auto mergeColor = GitQlientStyles::getBranchColorAt((laneNum - 1) % GitQlientStyles::getTotalBranchColors());
+
+         for (auto i = laneNum - 1, x2 = LANE_WIDTH * laneNum; i >= 0; --i, x2 -= LANE_WIDTH)
          {
-            auto prevLane = commit.getLane(i + 1);
-            laneHeadPresent
-                = prevLane.isHead() || prevLane.equals(LaneType::JOIN_R) || prevLane.equals(LaneType::JOIN_L);
-         }
+            x1 = x2 - LANE_WIDTH;
 
-         if (!currentLane.equals(LaneType::EMPTY))
-         {
-            auto color = activeColor;
+            auto currentLane = commit.getLane(i);
 
-            if (i != activeLane)
-               color = GitQlientStyles::getBranchColorAt(i % GitQlientStyles::getTotalBranchColors());
-            else if (isWip && !mCache->pendingLocalChanges())
-               color = QColor("#D89000");
+            if (!laneHeadPresent && i < laneNum - 1)
+            {
+               auto prevLane = commit.getLane(i + 1);
+               laneHeadPresent
+                   = prevLane.isHead() || prevLane.equals(LaneType::JOIN_R) || prevLane.equals(LaneType::JOIN_L);
+            }
 
-            if (!isSet)
-               mergeColor = getMergeColor(currentLane, commit, i, color, isSet);
+            if (!currentLane.equals(LaneType::EMPTY))
+            {
+               auto color = activeColor;
 
-            paintGraphLane(p, currentLane, laneHeadPresent, x1, x2, color, activeColor, mergeColor, isWip);
+               if (i != activeLane)
+                  color = GitQlientStyles::getBranchColorAt(i % GitQlientStyles::getTotalBranchColors());
 
-            if (mView->hasActiveFilter())
-               break;
+               if (!isSet)
+                  mergeColor = getMergeColor(currentLane, commit, i, color, isSet);
+
+               paintGraphLane(p, currentLane, laneHeadPresent, x1, x2, color, activeColor, mergeColor, false,
+                              commit.hasChilds());
+
+               if (mView->hasActiveFilter())
+                  break;
+            }
          }
       }
    }
@@ -313,9 +416,20 @@ void RepositoryViewDelegate::paintLog(QPainter *p, const QStyleOptionViewItem &o
 
    auto offset = 0;
 
+   if (mGitServerCache)
+   {
+      if (const auto pr = mGitServerCache->getPullRequest(commit.sha()); pr.isValid())
+      {
+         offset = 5;
+         paintPrStatus(p, opt, offset, pr);
+      }
+   }
+
    if (commit.hasReferences() && !mView->hasActiveFilter())
    {
-      offset = 5;
+      if (offset == 0)
+         offset = 5;
+
       paintTagBranch(p, opt, offset, sha);
    }
 
@@ -355,7 +469,7 @@ void RepositoryViewDelegate::paintTagBranch(QPainter *painter, QStyleOptionViewI
       for (const auto &branch : remoteBranches)
          markValues.insert(branch, QColor("#011f4b"));
 
-      const auto tags = commit.getReferences(References::Type::Tag);
+      const auto tags = commit.getReferences(References::Type::LocalTag);
       for (const auto &tag : tags)
          markValues.insert(tag, GitQlientStyles::getTagColor());
    }
@@ -394,4 +508,33 @@ void RepositoryViewDelegate::paintTagBranch(QPainter *painter, QStyleOptionViewI
 
       startPoint += rectWidth + mark_spacing;
    }
+}
+
+void RepositoryViewDelegate::paintPrStatus(QPainter *painter, QStyleOptionViewItem opt, int &startPoint,
+                                           const PullRequest &pr) const
+{
+   QColor c;
+
+   switch (pr.state.eState)
+   {
+      case PullRequest::HeadState::State::Failure:
+         c = GitQlientStyles::getRed();
+         break;
+      case PullRequest::HeadState::State::Success:
+         c = GitQlientStyles::getGreen();
+         break;
+      default:
+      case PullRequest::HeadState::State::Pending:
+         c = GitQlientStyles::getOrange();
+         break;
+   }
+
+   painter->save();
+   painter->setRenderHint(QPainter::Antialiasing);
+   painter->setPen(c);
+   painter->setBrush(c);
+   painter->drawEllipse(opt.rect.x() + startPoint, opt.rect.y() + (opt.rect.height() / 2) - 5, 10, 10);
+   painter->restore();
+
+   startPoint += 10 + 5;
 }

@@ -2,14 +2,31 @@
 
 #include <QVector>
 
-const QString GitQlientSettings::ExternalEditorKey = "externalEditor";
-const QString GitQlientSettings::ExternalEditorValue = "gedit";
+QString GitQlientSettings::PinnedRepos = "Config/PinnedRepos";
+QString GitQlientSettings::SplitFileDiffView = "SplitDiff";
 
-void GitQlientSettings::setValue(const QString &key, const QVariant &value)
+void GitQlientSettings::setGlobalValue(const QString &key, const QVariant &value)
 {
-   QSettings::setValue(key, value);
+   globalSettings.setValue(key, value);
+   globalSettings.sync();
+}
 
-   emit valueChanged(key, value);
+QVariant GitQlientSettings::globalValue(const QString &key, const QVariant &defaultValue)
+{
+   return globalSettings.value(key, defaultValue);
+}
+
+void GitQlientSettings::setLocalValue(const QString &repo, const QString &key, const QVariant &value)
+{
+   QSettings localSettings(repo + "/GitQlientConfig.ini", QSettings::IniFormat);
+   localSettings.setValue(key, value);
+   localSettings.sync();
+}
+
+QVariant GitQlientSettings::localValue(const QString &repo, const QString &key, const QVariant &defaultValue)
+{
+   QSettings localSettings(repo + "/GitQlientConfig.ini", QSettings::IniFormat);
+   return localSettings.value(key, defaultValue);
 }
 
 void GitQlientSettings::setProjectOpened(const QString &projectPath)
@@ -21,7 +38,7 @@ void GitQlientSettings::setProjectOpened(const QString &projectPath)
 
 QStringList GitQlientSettings::getRecentProjects() const
 {
-   auto projects = QSettings::value("Config/RecentProjects", QStringList()).toStringList();
+   auto projects = globalSettings.value("Config/RecentProjects", QStringList()).toStringList();
 
    QStringList recentProjects;
    const auto end = std::min(projects.count(), 5);
@@ -34,7 +51,7 @@ QStringList GitQlientSettings::getRecentProjects() const
 
 void GitQlientSettings::saveRecentProjects(const QString &projectPath)
 {
-   auto usedProjects = QSettings::value("Config/RecentProjects", QStringList()).toStringList();
+   auto usedProjects = globalSettings.value("Config/RecentProjects", QStringList()).toStringList();
 
    if (usedProjects.contains(projectPath))
    {
@@ -47,18 +64,18 @@ void GitQlientSettings::saveRecentProjects(const QString &projectPath)
    while (!usedProjects.isEmpty() && usedProjects.count() > 5)
       usedProjects.removeLast();
 
-   GitQlientSettings::setValue("Config/RecentProjects", usedProjects);
+   GitQlientSettings::setGlobalValue("Config/RecentProjects", usedProjects);
 }
 
 void GitQlientSettings::clearRecentProjects()
 {
-   remove("Config/RecentProjects");
+   globalSettings.remove("Config/RecentProjects");
 }
 
 void GitQlientSettings::saveMostUsedProjects(const QString &projectPath)
 {
-   auto projects = QSettings::value("Config/UsedProjects", QStringList()).toStringList();
-   auto timesUsed = QSettings::value("Config/UsedProjectsCount", QList<QVariant>()).toList();
+   auto projects = globalSettings.value("Config/UsedProjects", QStringList()).toStringList();
+   auto timesUsed = globalSettings.value("Config/UsedProjectsCount", QList<QVariant>()).toList();
 
    if (projects.contains(projectPath))
    {
@@ -71,20 +88,20 @@ void GitQlientSettings::saveMostUsedProjects(const QString &projectPath)
       timesUsed.append(1);
    }
 
-   GitQlientSettings::setValue("Config/UsedProjects", projects);
-   GitQlientSettings::setValue("Config/UsedProjectsCount", timesUsed);
+   GitQlientSettings::setGlobalValue("Config/UsedProjects", projects);
+   GitQlientSettings::setGlobalValue("Config/UsedProjectsCount", timesUsed);
 }
 
 void GitQlientSettings::clearMostUsedProjects()
 {
-   remove("Config/UsedProjects");
-   remove("Config/UsedProjectsCount");
+   globalSettings.remove("Config/UsedProjects");
+   globalSettings.remove("Config/UsedProjectsCount");
 }
 
 QStringList GitQlientSettings::getMostUsedProjects() const
 {
-   const auto projects = QSettings::value("Config/UsedProjects", QStringList()).toStringList();
-   const auto timesUsed = QSettings::value("Config/UsedProjectsCount", QString()).toList();
+   const auto projects = globalSettings.value("Config/UsedProjects", QStringList()).toStringList();
+   const auto timesUsed = globalSettings.value("Config/UsedProjectsCount", QString()).toList();
 
    QMultiMap<int, QString> projectOrderedByUse;
 

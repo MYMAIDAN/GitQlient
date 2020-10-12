@@ -1,10 +1,12 @@
 #include <QApplication>
 #include <QFontDatabase>
 #include <QIcon>
+#include <QTimer>
 
 #include <GitQlient.h>
-#include <QLogger.h>
 #include <GitQlientSettings.h>
+
+#include <QLogger.h>
 
 using namespace QLogger;
 
@@ -18,22 +20,24 @@ int main(int argc, char *argv[])
    auto argNum = argc;
 
    while (argNum--)
-      arguments.prepend(argv[argNum]);
+      arguments.prepend(QString::fromUtf8(argv[argNum]));
 
    QApplication::setOrganizationName("CescSoftware");
    QApplication::setOrganizationDomain("francescmm.com");
    QApplication::setApplicationName("GitQlient");
    QApplication::setWindowIcon(QIcon(":/icons/GitQlientLogoIco"));
 
-   QFontDatabase::addApplicationFont(":/Ubuntu");
-   QFontDatabase::addApplicationFont(":/UbuntuMono");
+   QFontDatabase::addApplicationFont(":/DejaVuSans");
+   QFontDatabase::addApplicationFont(":/DejaVuSansMono");
 
    GitQlientSettings settings;
-   settings.setValue("isGitQlient", true);
+   settings.setGlobalValue("isGitQlient", true);
 
    GitQlient mainWin(arguments);
 
-   mainWin.showMaximized();
+   mainWin.show();
+
+   QTimer::singleShot(500, &mainWin, &GitQlient::restorePinnedRepos);
 
    const auto ret = app.exec();
 

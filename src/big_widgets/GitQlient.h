@@ -26,7 +26,7 @@
 #include <QWidget>
 #include <QSet>
 
-class QTabWidget;
+class QPinnableTabWidget;
 class ConfigWidget;
 
 /*!
@@ -74,8 +74,14 @@ public:
    */
    void setArgumentsPostInit(const QStringList &arguments);
 
+   /**
+    * @brief restorePinnedRepos This method restores the pinned repos from the last session
+    * @param pinnedRepos The list of repos to restore
+    */
+   void restorePinnedRepos();
+
 private:
-   QTabWidget *mRepos = nullptr;
+   QPinnableTabWidget *mRepos = nullptr;
    ConfigWidget *mConfigWidget = nullptr;
    QSet<QString> mCurrentRepos;
 
@@ -98,7 +104,15 @@ private:
 
     \param repoPath The full path of the repository to be opened.
    */
-   void addRepoTab(const QString &repoPath = "");
+   void addRepoTab(const QString &repoPath);
+
+   /*!
+    \brief Creates a new GitQlientWidget instance or the repository defined in the \p repoPath value. After that, it
+    adds a new tab in the current widget.
+
+   \param repoPath The full path of the repository to be opened.
+           */
+   void addNewRepoTab(const QString &repoPath, bool pinned);
    /*!
     \brief Closes a tab. This implies to close all child widgets and remove cache and configuration for that repository
     until it's opened again.
@@ -106,4 +120,16 @@ private:
     \param tabIndex The tab index that triggered the close action.
    */
    void closeTab(int tabIndex);
+
+   /**
+    * @brief onSuccessOpen Refreshes the UI for the most used and most recent projects lists.
+    * @param fullPath The full path of the project successfully opened.
+    */
+   void onSuccessOpen(const QString &fullPath);
+
+   /**
+    * @brief conditionallyOpenPreConfigDlg Opens the pre-config dialog in case that the repo is open for the very first
+    * time.
+    */
+   void conditionallyOpenPreConfigDlg(const QString &repoPath);
 };

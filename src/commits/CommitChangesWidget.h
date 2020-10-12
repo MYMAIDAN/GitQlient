@@ -28,9 +28,10 @@
 
 class QListWidget;
 class QListWidgetItem;
-class RevisionsCache;
+class GitCache;
 class GitBase;
 class RevisionFiles;
+class FileWidget;
 
 namespace Ui
 {
@@ -42,7 +43,7 @@ class CommitChangesWidget : public QWidget
    Q_OBJECT
 
 signals:
-   void signalShowDiff(const QString &sha, const QString &parentSha, const QString &fileName);
+   void signalShowDiff(const QString &sha, const QString &parentSha, const QString &fileName, bool isCached);
    void signalChangesCommitted(bool commited);
    void signalCheckoutPerformed();
    void signalShowFileHistory(const QString &fileName);
@@ -58,7 +59,7 @@ signals:
    void signalEditFile(const QString &fileName, int line, int column);
 
 public:
-   explicit CommitChangesWidget(const QSharedPointer<RevisionsCache> &cache, const QSharedPointer<GitBase> &git,
+   explicit CommitChangesWidget(const QSharedPointer<GitCache> &cache, const QSharedPointer<GitBase> &git,
                                 QWidget *parent = nullptr);
 
    ~CommitChangesWidget();
@@ -68,16 +69,25 @@ public:
    virtual void clear() final;
 
 protected:
+   struct WipCacheItem
+   {
+      bool keep = false;
+      QListWidgetItem *item = nullptr;
+   };
+
    Ui::CommitChangesWidget *ui = nullptr;
-   QSharedPointer<RevisionsCache> mCache;
+   QSharedPointer<GitCache> mCache;
    QSharedPointer<GitBase> mGit;
    QString mCurrentSha;
-   QMap<QString, QPair<bool, QListWidgetItem *>> mCurrentFilesCache;
+   QMap<QString, WipCacheItem> mInternalCache;
 
    virtual bool commitChanges() = 0;
    virtual void showUnstagedMenu(const QPoint &pos) = 0;
+   void showUntrackedMenu(const QPoint &pos);
 
    virtual void insertFiles(const RevisionFiles &files, QListWidget *fileList) final;
+   QPair<QListWidgetItem *, FileWidget *> fillFileItemInfo(const QString &file, bool isConflict, const QString &icon,
+                                                           const QColor &color, QListWidget *parent);
    virtual void prepareCache() final;
    virtual void clearCache() final;
    virtual void addAllFilesToCommitList() final;

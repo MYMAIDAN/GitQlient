@@ -24,7 +24,7 @@
  ***************************************************************************************/
 
 #include <GitExecResult.h>
-#include <RevisionsCache.h>
+#include <GitCache.h>
 
 #include <QObject>
 #include <QSharedPointer>
@@ -48,6 +48,8 @@ public:
 
    void setWorkingDir(const QString &workingDir);
 
+   QString getGitQlientSettingsDir() const;
+
    void updateCurrentBranch();
 
    QString getCurrentBranch();
@@ -56,5 +58,6 @@ public:
 
 protected:
    QString mWorkingDirectory;
+   QString mGitDirectory;
    QString mCurrentBranch;
 };

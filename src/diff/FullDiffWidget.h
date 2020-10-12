@@ -23,12 +23,12 @@
  ** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  ***************************************************************************************/
 
-#include <QSyntaxHighlighter>
-#include <QTextEdit>
+#include <IDiffWidget.h>
 
-class GitBase;
-class DiffInfoPanel;
-class RevisionsCache;
+#include <QSyntaxHighlighter>
+
+class QPlainTextEdit;
+class QPushButton;
 
 /*!
  \brief The FullDiffWidget class is an overload class inherited from QTextEdit that process the output from a diff for a
@@ -36,7 +36,7 @@ class RevisionsCache;
  diff chuck starts.
 
 */
-class FullDiffWidget : public QTextEdit
+class FullDiffWidget : public IDiffWidget
 {
    Q_OBJECT
 
@@ -47,35 +47,35 @@ public:
     \param git The git object to perform Git operations.
     \param parent The parent widget if needed.
    */
-   explicit FullDiffWidget(const QSharedPointer<GitBase> &git, QSharedPointer<RevisionsCache> cache,
+   explicit FullDiffWidget(const QSharedPointer<GitBase> &git, QSharedPointer<GitCache> cache,
                            QWidget *parent = nullptr);
 
    /*!
     \brief Reloads the current diff in case the user loaded the work in progress as base commit.
 
    */
-   void reload();
+   bool reload() override;
    /*!
     \brief Loads a diff for a specific commit SHA respect another commit SHA.
 
     \param sha The base commit SHA.
     \param diffToSha The commit SHA to comapre to.
+    \param diffData The diff data returned by the git command.
+    \return True if there is a diff to load, otherwise false.
    */
-   void loadDiff(const QString &sha, const QString &diffToSha);
+   void loadDiff(const QString &sha, const QString &diffToSha, const QString &diffData);
 
 private:
-   QSharedPointer<GitBase> mGit;
-   QSharedPointer<RevisionsCache> mCache;
-   QString mCurrentSha;
-   QString mPreviousSha;
+   QPushButton *mGoPrevious = nullptr;
+   QPushButton *mGoNext = nullptr;
    QString mPreviousDiffText;
-   DiffInfoPanel *mDiffInfoPanel = nullptr;
-   QTextEdit *mDiffWidget = nullptr;
+   QPlainTextEdit *mDiffWidget = nullptr;
+   QVector<int> mFilePositions;
 
    class DiffHighlighter : public QSyntaxHighlighter
    {
    public:
-      DiffHighlighter(QTextEdit *p);
+      DiffHighlighter(QTextDocument *document);
       void highlightBlock(const QString &text) override;
    };
 
@@ -87,4 +87,12 @@ private:
     \param fileChunk The file chuck to compare.
    */
    void processData(const QString &fileChunk);
+   /**
+    * @brief moveChunkUp Moves to the previous diff chunk.
+    */
+   void moveChunkUp();
+   /**
+    * @brief moveChunkDown Moves to the following diff chunk.
+    */
+   void moveChunkDown();
 };

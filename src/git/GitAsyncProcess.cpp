@@ -1,6 +1,5 @@
 #include "GitAsyncProcess.h"
 
-#include <QTemporaryFile>
 GitAsyncProcess::GitAsyncProcess(const QString &workingDir)
    : AGitProcess(workingDir)
 {
@@ -8,11 +7,15 @@ GitAsyncProcess::GitAsyncProcess(const QString &workingDir)
 
 GitExecResult GitAsyncProcess::run(const QString &command)
 {
-   return { execute(command), "" };
+
+   const auto ret = execute(command);
+
+   return { ret, "" };
 }
 
 void GitAsyncProcess::onFinished(int code, QProcess::ExitStatus exitStatus)
 {
+
    AGitProcess::onFinished(code, exitStatus);
 
    if (!mCanceling)

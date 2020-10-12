@@ -24,12 +24,19 @@
  ***************************************************************************************/
 
 #include <QStyledItemDelegate>
+#include <QDateTime>
 
 class CommitHistoryView;
-class RevisionsCache;
+class GitCache;
 class GitBase;
 class Lane;
 class CommitInfo;
+class GitServerCache;
+
+namespace GitServer
+{
+struct PullRequest;
+}
 
 const int ROW_HEIGHT = 25;
 const int LANE_WIDTH = 3 * ROW_HEIGHT / 4;
@@ -52,8 +59,8 @@ public:
     * @param git The git object to execute git commands.
     * @param view The view that uses the delegate.
     */
-   RepositoryViewDelegate(const QSharedPointer<RevisionsCache> &cache, const QSharedPointer<GitBase> &git,
-                          CommitHistoryView *view);
+   RepositoryViewDelegate(const QSharedPointer<GitCache> &cache, const QSharedPointer<GitBase> &git,
+                          const QSharedPointer<GitServerCache> &gitServerCache, CommitHistoryView *view);
 
    /**
     * @brief Overrided method to paint the different columns and rows in the view.
@@ -70,14 +77,21 @@ public:
     */
    QSize sizeHint(const QStyleOptionViewItem &, const QModelIndex &) const override;
 
+protected:
+   bool editorEvent(QEvent *event, QAbstractItemModel *model, const QStyleOptionViewItem &option,
+                    const QModelIndex &index) override;
+
 private:
-   QSharedPointer<RevisionsCache> mCache;
+   QSharedPointer<GitCache> mCache;
    QSharedPointer<GitBase> mGit;
+   QSharedPointer<GitServerCache> mGitServerCache;
    CommitHistoryView *mView = nullptr;
    int diffTargetRow = -1;
+   int mColumnPressed = -1;
 
    /**
-    * @brief Paints the log column. This method is in charge of painting the commit message as well as tags or branches.
+    * @brief Paints the log column. This method is in charge of painting the commit message as well as tags or
+    * branches.
     *
     * @param p The painter device.
     * @param o The style options of the item.
@@ -107,7 +121,8 @@ private:
     * @param isWip Tells the method if it's the WIP commit so it's painted differently.
     */
    void paintGraphLane(QPainter *p, const Lane &type, bool laneHeadPresent, int x1, int x2, const QColor &col,
-                       const QColor &activeCol, const QColor &mergeColor, bool isWip = false) const;
+                       const QColor &activeCol, const QColor &mergeColor, bool isWip = false,
+                       bool hasChilds = true) const;
 
    /**
     * @brief Specialized method that paints a tag in the commit message column.
@@ -119,6 +134,28 @@ private:
     */
    void paintTagBranch(QPainter *painter, QStyleOptionViewItem opt, int &startPoint, const QString &sha) const;
 
+   /**
+    * @brief Specialized method that paints a tag in the commit message column.
+    *
+    * @param painter The painter device.
+    * @param opt The style options of the item.
+    * @param startPoint The starting X coordinate for the tag.
+    * @param pr The PullRequest status.
+    */
+   void paintPrStatus(QPainter *painter, QStyleOptionViewItem opt, int &startPoint,
+                      const GitServer::PullRequest &pr) const;
+
+   /**
+    * @brief getMergeColor Returns the color to be used for painting the external circle of the node. This methods
+    * searches the origin of the merge and uses the same lane color.
+    * @param currentLane The current lane type.
+    * @param commit The current commit.
+    * @param currentLaneIndex The current index of the lane.
+    * @param defaultColor The default color in case it's not a merge.
+    * @param isSet Boolean used as a shortcut. If the current iteration is a merge it will change the value for the
+    * following lanes.
+    * @return Returns the color of the lane that merges into the current node, otherwise it returns @p defaultColor.
+    */
    QColor getMergeColor(const Lane &currentLane, const CommitInfo &commit, int currentLaneIndex,
                         const QColor &defaultColor, bool &isSet) const;
 };

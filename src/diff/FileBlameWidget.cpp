@@ -1,6 +1,6 @@
-﻿#include "FileBlameWidget.h"
+#include "FileBlameWidget.h"
 
-#include <RevisionsCache.h>
+#include <GitCache.h>
 #include <FileDiffView.h>
 #include <GitHistory.h>
 #include <CommitInfo.h>
@@ -16,16 +16,16 @@
 
 namespace
 {
-const int kTotalColors = 8;
-const std::array<QString, kTotalColors> kBorderColors { "25, 65, 99",    "36, 95, 146",  "44, 116, 177",
-                                                        "56, 136, 205",  "87, 155, 213", "118, 174, 221",
-                                                        "150, 192, 221", "197, 220, 240" };
+static const int kTotalColors = 8;
+static const std::array<const char *, kTotalColors> kBorderColors { { "z25, 65, 99", "36, 95, 146", "44, 116, 177",
+                                                                      "56, 136, 205", "87, 155, 213", "118, 174, 221",
+                                                                      "150, 192, 221", "197, 220, 240" } };
 qint64 kSecondsNewest = 0;
 qint64 kSecondsOldest = QDateTime::currentDateTime().toSecsSinceEpoch();
 qint64 kIncrementSecs = 0;
 }
 
-FileBlameWidget::FileBlameWidget(const QSharedPointer<RevisionsCache> &cache, const QSharedPointer<GitBase> &git,
+FileBlameWidget::FileBlameWidget(const QSharedPointer<GitCache> &cache, const QSharedPointer<GitBase> &git,
                                  QWidget *parent)
    : QFrame(parent)
    , mCache(cache)
@@ -46,8 +46,8 @@ FileBlameWidget::FileBlameWidget(const QSharedPointer<RevisionsCache> &cache, co
    mInfoFont.setPointSize(9);
 
    mCodeFont = QFont(mInfoFont);
-   mCodeFont.setFamily("Ubuntu Mono");
-   mCodeFont.setPointSize(10);
+   mCodeFont.setFamily("DejaVu Sans Mono");
+   mCodeFont.setPointSize(8);
 
    mScrollArea = new QScrollArea();
    mScrollArea->setWidget(mAnotation);
@@ -111,7 +111,11 @@ QString FileBlameWidget::getCurrentSha() const
 
 QVector<FileBlameWidget::Annotation> FileBlameWidget::processBlame(const QString &blame)
 {
+#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
+   const auto lines = blame.split("\n", Qt::SkipEmptyParts);
+#else
    const auto lines = blame.split("\n", QString::SkipEmptyParts);
+#endif
    QVector<Annotation> annotations;
 
    for (const auto &line : lines)
@@ -302,7 +306,7 @@ QLabel *FileBlameWidget::createNumLabel(const Annotation &annotation, int row)
       const auto dtSinceEpoch = annotation.dateTime.toSecsSinceEpoch();
       const auto colorIndex = qCeil((kSecondsNewest - dtSinceEpoch) / kIncrementSecs);
       numberLabel->setStyleSheet(
-          QString("QLabel { border-left: 5px solid rgb(%1) }").arg(kBorderColors.at(colorIndex)));
+          QString("QLabel { border-left: 5px solid rgb(%1) }").arg(QString::fromUtf8(kBorderColors.at(colorIndex))));
    }
    else
       numberLabel->setStyleSheet("QLabel { border-left: 5px solid #D89000 }");

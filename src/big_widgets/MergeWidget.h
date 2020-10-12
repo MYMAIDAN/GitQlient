@@ -29,14 +29,15 @@
 class GitBase;
 class QVBoxLayout;
 class QPushButton;
-class QStackedWidget;
 class MergeInfoWidget;
 class QLineEdit;
 class QTextEdit;
 class FileDiffWidget;
 class RevisionFiles;
-class RevisionsCache;
-class ConflictButton;
+class GitCache;
+class FileEditor;
+class QListWidget;
+class QListWidgetItem;
 
 /**
  * @brief The MergeWidget class creates the layout for when a merge happens. The layout is composed by two lists of
@@ -81,7 +82,7 @@ public:
     * @param git The git object to perform Git operations.
     * @param parent The parent widget if needed.
     */
-   explicit MergeWidget(const QSharedPointer<RevisionsCache> &gitQlientCache, const QSharedPointer<GitBase> &git,
+   explicit MergeWidget(const QSharedPointer<GitCache> &gitQlientCache, const QSharedPointer<GitBase> &git,
                         QWidget *parent = nullptr);
 
    /**
@@ -92,17 +93,16 @@ public:
    void configure(const RevisionFiles &files, ConflictReason reason);
 
 private:
-   QSharedPointer<RevisionsCache> mGitQlientCache;
+   QSharedPointer<GitCache> mGitQlientCache;
    QSharedPointer<GitBase> mGit;
-   QVBoxLayout *mConflictBtnContainer = nullptr;
-   QVBoxLayout *mAutoMergedBtnContainer = nullptr;
-   QStackedWidget *mCenterStackedWidget = nullptr;
+   QListWidget *mConflictFiles = nullptr;
+   QListWidget *mMergedFiles = nullptr;
    QLineEdit *mCommitTitle = nullptr;
    QTextEdit *mDescription = nullptr;
    QPushButton *mMergeBtn = nullptr;
    QPushButton *mAbortBtn = nullptr;
-   QMap<ConflictButton *, FileDiffWidget *> mConflictButtons;
    ConflictReason mReason = ConflictReason::Merge;
+   FileDiffWidget *mFileDiff = nullptr;
 
    /**
     * @brief Fills both lists of ConflictButton.
@@ -111,11 +111,11 @@ private:
     */
    void fillButtonFileList(const RevisionFiles &files);
    /**
-    * @brief Changes the current diff view of a file when a button is clicked.
+    * @brief Changes the current diff view of a file when a file in the list is clicked.
     *
-    * @param fileBtnChecked True if the ConflictButton is selected.
+    * @param item The selected item of the list.
     */
-   void changeDiffView(bool fileBtnChecked);
+   void changeDiffView(QListWidgetItem *item);
    /**
     * @brief Aborts the current merge.
     *
@@ -134,12 +134,7 @@ private:
    /**
     * @brief When a conflict is marked as resolved the button is moved to the solved list. This action is triggered by a
     * ConflictButton.
-    *
+    * @param fileName The file name of the file whose conflict is resolved.
     */
-   void onConflictResolved();
-   /**
-    * @brief Updates the current file diff view. This action is triggered by a ConflictButton.
-    *
-    */
-   void onUpdateRequested();
+   void onConflictResolved(const QString &fileName);
 };

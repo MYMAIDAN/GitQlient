@@ -25,7 +25,7 @@
 
 #include <QFrame>
 
-class RevisionsCache;
+class GitCache;
 class GitBase;
 class CommitHistoryModel;
 class CommitHistoryView;
@@ -35,9 +35,13 @@ class QStackedWidget;
 class WipWidget;
 class AmendWidget;
 class CommitInfoWidget;
-class QCheckBox;
+class CheckBox;
 class RepositoryViewDelegate;
-
+class FullDiffWidget;
+class FileDiffWidget;
+class BranchesWidgetMinimal;
+class QPushButton;
+class GitServerCache;
 /*!
  \brief The HistoryWidget is the responsible fro showing the history of the repository. It is the first widget shown
  when a repository is open and manages all the signals from its subwidgets to the GitQlientRepo class. It also creates
@@ -99,7 +103,7 @@ signals:
     \param parentSha The commit SHA to compare to.
     \param fileName The file name for the diff.
    */
-   void signalShowDiff(const QString &sha, const QString &parentSha, const QString &fileName);
+   void signalShowDiff(const QString &sha, const QString &parentSha, const QString &fileName, bool isCached);
 
    /**
     * @brief signalEditFile Signal triggered when the user wants to edit a file and is running GitQlient from QtCreator.
@@ -143,6 +147,11 @@ signals:
     \brief Signal triggered  when the WIP needs to be updated.
    */
    void signalUpdateWip();
+   /**
+    * @brief showPrDetailedView Signal that makes the view change to the Pull Request detailed view
+    * @param pr The pull request number to show.
+    */
+   void showPrDetailedView(int pr);
 
 public:
    /*!
@@ -152,8 +161,8 @@ public:
     \param git The git object to perform Git operations.
     \param parent The parent widget if needed.
    */
-   explicit HistoryWidget(const QSharedPointer<RevisionsCache> &cache, const QSharedPointer<GitBase> git,
-                          QWidget *parent = nullptr);
+   explicit HistoryWidget(const QSharedPointer<GitCache> &cache, const QSharedPointer<GitBase> git,
+                          const QSharedPointer<GitServerCache> &gitServerCache, QWidget *parent = nullptr);
    /*!
     \brief Destructor.
 
@@ -212,19 +221,37 @@ public:
    */
    void onNewRevisions(int totalCommits);
 
+protected:
+   void keyPressEvent(QKeyEvent *event) override;
+   void keyReleaseEvent(QKeyEvent *event) override;
+
 private:
+   enum class Pages
+   {
+      Graph,
+      FileDiff,
+      FullDiff
+   };
+
    QSharedPointer<GitBase> mGit;
-   QSharedPointer<RevisionsCache> mCache;
+   QSharedPointer<GitCache> mCache;
+   QSharedPointer<GitServerCache> mGitServerCache;
    CommitHistoryModel *mRepositoryModel = nullptr;
    CommitHistoryView *mRepositoryView = nullptr;
    BranchesWidget *mBranchesWidget = nullptr;
    QLineEdit *mSearchInput = nullptr;
    QStackedWidget *mCommitStackedWidget = nullptr;
+   QStackedWidget *mCenterStackedWidget = nullptr;
    WipWidget *mWipWidget = nullptr;
    AmendWidget *mAmendWidget = nullptr;
    CommitInfoWidget *mCommitInfoWidget = nullptr;
-   QCheckBox *mChShowAllBranches = nullptr;
+   CheckBox *mChShowAllBranches = nullptr;
    RepositoryViewDelegate *mItemDelegate = nullptr;
+   QFrame *mGraphFrame = nullptr;
+   FileDiffWidget *mFileDiff = nullptr;
+   FullDiffWidget *mFullDiffWidget = nullptr;
+   QPushButton *mReturnFromFull = nullptr;
+   bool mReverseSearch = false;
 
    /*!
     \brief Performs a search based on the input of the search QLineEdit with the users input.
@@ -245,12 +272,6 @@ private:
    */
    void commitSelected(const QModelIndex &index);
    /*!
-    \brief Retrieves the SHA from the QModelIndex and triggers the \ref signalOpenDiff signal.
-
-    \param index The index from the model.
-   */
-   void openDiff(const QModelIndex &index);
-   /*!
     \brief Action that stores in the settings the new value for the check box to show all the branches. It also triggers
     the \ref signalAllBranchesActive signal.
 
@@ -270,4 +291,37 @@ private:
     \param branchToMerge The branch to merge from.
    */
    void mergeBranch(const QString &current, const QString &branchToMerge);
+
+   /**
+    * @brief endEditFile Closes the file diff view.
+    */
+   void returnToView();
+
+   /**
+    * @brief cherryPickCommit Cherry-picks the commit defined by the SHA in the QLineEdit of the filter.
+    */
+   void cherryPickCommit();
+
+   /**
+    * @brief showFileDiff Shows the file diff.
+    * @param sha The base commit SHA.
+    * @param parentSha The commit SHA to compare with.
+    * @param fileName The file name to diff.
+    */
+   void showFileDiff(const QString &sha, const QString &parentSha, const QString &fileName, bool isCached);
+
+   /**
+    * @brief showFileDiff Shows the file diff.
+    * @param sha The base commit SHA.
+    * @param parentSha The commit SHA to compare with.
+    * @param fileName The file name to diff.
+    */
+   void showFileDiffEdition(const QString &sha, const QString &parentSha, const QString &fileName);
+
+   /**
+    * @brief showFullDiff Shows the full commit diff.
+    * @param sha The base commit SHA.
+    * @param parentSha The commit SHA to compare with.
+    */
+   void showFullDiff();
 };

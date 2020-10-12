@@ -46,7 +46,7 @@ signals:
     *
     * @param checked True if the button is selected, otherwise false.
     */
-   void toggled(bool checked);
+   void clicked();
    /**
     * @brief Signal triggered when the user solves the merge conflict.
     *
@@ -85,6 +85,12 @@ public:
     */
    void setChecked(bool checked);
 
+   /**
+    * @brief getFileName
+    * @return
+    */
+   QString getFileName() const;
+
 private:
    QSharedPointer<GitBase> mGit;
    QString mFileName;
@@ -104,9 +110,4 @@ private:
     *
     */
    void resolveConflict();
-
-   /**
-    * @brief openFileEditor Opens the external file editor.
-    */
-   void openFileEditor();
 };

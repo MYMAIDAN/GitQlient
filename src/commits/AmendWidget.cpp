@@ -1,7 +1,7 @@
 #include <AmendWidget.h>
 #include <ui_CommitChangesWidget.h>
 
-#include <RevisionsCache.h>
+#include <GitCache.h>
 #include <GitRepoLoader.h>
 #include <GitBase.h>
 #include <GitLocal.h>
@@ -14,12 +14,7 @@
 
 using namespace QLogger;
 
-const int AmendWidget::kMaxTitleChars = 50;
-
-QString AmendWidget::lastMsgBeforeError;
-
-AmendWidget::AmendWidget(const QSharedPointer<RevisionsCache> &cache, const QSharedPointer<GitBase> &git,
-                         QWidget *parent)
+AmendWidget::AmendWidget(const QSharedPointer<GitCache> &cache, const QSharedPointer<GitBase> &git, QWidget *parent)
    : CommitChangesWidget(cache, git, parent)
 {
    ui->pbCommit->setText(tr("Amend"));
@@ -28,6 +23,9 @@ AmendWidget::AmendWidget(const QSharedPointer<RevisionsCache> &cache, const QSha
 void AmendWidget::configure(const QString &sha)
 {
    const auto commit = mCache->getCommitInfo(sha);
+
+   ui->amendFrame->setVisible(true);
+   ui->pbCancelAmend->setVisible(true);
 
    if (commit.parentsCount() <= 0)
       return;
@@ -50,9 +48,11 @@ void AmendWidget::configure(const QString &sha)
       const auto author = commit.author().split("<");
       ui->leAuthorName->setText(author.first());
       ui->leAuthorEmail->setText(author.last().mid(0, author.last().count() - 1));
+      ui->teDescription->setPlainText(commit.longLog().trimmed());
+      ui->leCommitTitle->setText(commit.shortLog());
 
       blockSignals(true);
-      mCurrentFilesCache.clear();
+      mInternalCache.clear();
       ui->untrackedFilesList->clear();
       ui->unstagedFilesList->clear();
       ui->stagedFilesList->clear();
@@ -77,13 +77,6 @@ void AmendWidget::configure(const QString &sha)
    ui->lUnstagedCount->setText(QString("(%1)").arg(ui->unstagedFilesList->count()));
    ui->lStagedCount->setText(QString("(%1)").arg(ui->stagedFilesList->count()));
 
-   if (lastMsgBeforeError.isEmpty())
-   {
-      ui->teDescription->setPlainText(commit.longLog().trimmed());
-      ui->leCommitTitle->setText(commit.shortLog());
-   }
-
-   ui->teDescription->moveCursor(QTextCursor::Start);
    ui->pbCommit->setEnabled(ui->stagedFilesList->count());
 }
 
@@ -98,8 +91,8 @@ bool AmendWidget::commitChanges()
 
       if (hasConflicts())
       {
-         QMessageBox::warning(this, tr("Impossible to commit"),
-                              tr("There are files with conflicts. Please, resolve the conflicts first."));
+         QMessageBox::critical(this, tr("Impossible to commit"),
+                               tr("There are files with conflicts. Please, resolve the conflicts first."));
       }
       else if (checkMsg(msg))
       {
@@ -110,7 +103,7 @@ bool AmendWidget::commitChanges()
 
          QApplication::setOverrideCursor(QCursor(Qt::WaitCursor));
          QScopedPointer<GitLocal> git(new GitLocal(mGit));
-         const auto ret = git->ammendCommit(files.getFiles(), files, msg, author);
+         const auto ret = git->ammendCommit(selFiles, files, msg, author);
          QApplication::restoreOverrideCursor();
 
          emit signalChangesCommitted(ret.success);
